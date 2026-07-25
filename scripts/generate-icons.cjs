@@ -1,0 +1,56 @@
+const fs = require('fs');
+const path = require('path');
+const sharp = require('sharp');
+
+const publicDir = path.join(__dirname, '..', 'public');
+if (!fs.existsSync(publicDir)) {
+  fs.mkdirSync(publicDir, { recursive: true });
+}
+
+// SVG content representing the exact present logo badge: Amber-400 background (#fbbf24), rounded corners, dark truck stroke (#09090b, stroke-width 2.5)
+const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="120" fill="#fbbf24"/>
+  <g transform="translate(96, 96) scale(13.333333)" fill="none" stroke="#09090b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/>
+    <path d="M15 18H9"/>
+    <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/>
+    <circle cx="17" cy="18" r="2"/>
+    <circle cx="7" cy="18" r="2"/>
+  </g>
+</svg>`;
+
+// Write icon.svg & logo.svg to public directory
+fs.writeFileSync(path.join(publicDir, 'icon.svg'), svgContent, 'utf8');
+fs.writeFileSync(path.join(publicDir, 'logo.svg'), svgContent, 'utf8');
+console.log('Saved icon.svg and logo.svg');
+
+// Generate PNG versions using sharp for maximum iOS / PWA compatibility
+async function generatePngs() {
+  const svgBuffer = Buffer.from(svgContent);
+
+  // apple-touch-icon.png (180x180)
+  await sharp(svgBuffer)
+    .resize(180, 180)
+    .png()
+    .toFile(path.join(publicDir, 'apple-touch-icon.png'));
+  console.log('Generated apple-touch-icon.png (180x180)');
+
+  // icon-192.png (192x192)
+  await sharp(svgBuffer)
+    .resize(192, 192)
+    .png()
+    .toFile(path.join(publicDir, 'icon-192.png'));
+  console.log('Generated icon-192.png (192x192)');
+
+  // icon-512.png (512x512)
+  await sharp(svgBuffer)
+    .resize(512, 512)
+    .png()
+    .toFile(path.join(publicDir, 'icon-512.png'));
+  console.log('Generated icon-512.png (512x512)');
+}
+
+generatePngs().catch((err) => {
+  console.error('Error generating PNGs:', err);
+  process.exit(1);
+});

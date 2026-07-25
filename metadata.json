@@ -1,0 +1,6 @@
+{
+  "name": "TIPPERLOG",
+  "description": "Tipper truck trip, collaborator income, private earnings, and expense tracking application.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
