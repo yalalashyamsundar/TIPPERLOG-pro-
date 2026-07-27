@@ -1271,146 +1271,240 @@ export default function App() {
       {/* 1. HEADER & BRANDING BAR                   */}
       {/* ========================================== */}
       <header className="sticky top-0 z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          {/* Logo Badge - SVG Image */}
-          <div className="flex items-center space-x-2.5">
-            <img src="/icon.svg" alt="TIPPERLOG Logo" className="w-9 h-9 rounded-xl shadow-xs shrink-0 object-contain" />
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="font-extrabold tracking-tight text-lg text-white font-sans">
-                  TIPPERLOG
-                </span>
-              </div>
-              <p
-                className="text-xs text-zinc-400 flex items-center space-x-1.5 font-mono cursor-pointer"
-                onClick={() => setShowSupabaseModal(true)}
-                title={
-                  isSyncing
-                    ? 'Database Syncing...'
-                    : supabaseConnected
-                    ? 'Database Connected'
-                    : 'Database Offline'
-                }
-              >
-                <span
-                  className={`inline-block w-2 h-2 rounded-full transition-colors ${
+        <div className="max-w-md md:max-w-4xl lg:max-w-6xl xl:max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
+          {/* Top Row: Logo Badge & Action Buttons */}
+          <div className="flex items-center justify-between w-full md:w-auto">
+            {/* Logo Badge - SVG Image */}
+            <div className="flex items-center space-x-2.5">
+              <img src="/icon.svg" alt="TIPPERLOG Logo" className="w-9 h-9 rounded-xl shadow-xs shrink-0 object-contain" />
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="font-extrabold tracking-tight text-lg text-white font-sans">
+                    TIPPERLOG
+                  </span>
+                </div>
+                <p
+                  className="text-xs text-zinc-400 flex items-center space-x-1.5 font-mono cursor-pointer"
+                  onClick={() => setShowSupabaseModal(true)}
+                  title={
                     isSyncing
-                      ? 'bg-amber-400 animate-pulse'
+                      ? 'Database Syncing...'
                       : supabaseConnected
-                      ? 'bg-emerald-400'
-                      : 'bg-rose-500'
-                  }`}
-                ></span>
-                <span>{data.settings.vehicleRegNo}</span>
-              </p>
+                      ? 'Database Connected'
+                      : 'Database Offline'
+                  }
+                >
+                  <span
+                    className={`inline-block w-2 h-2 rounded-full transition-colors ${
+                      isSyncing
+                        ? 'bg-amber-400 animate-pulse'
+                        : supabaseConnected
+                        ? 'bg-emerald-400'
+                        : 'bg-rose-500'
+                    }`}
+                  ></span>
+                  <span>{data.settings.vehicleRegNo}</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Header Action Buttons (Mobile View) */}
+            <div className="flex md:hidden items-center space-x-1.5">
+              <button
+                onClick={() => setShowPdfReportModal(true)}
+                className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-mono font-medium transition flex items-center space-x-1.5 shadow-xs"
+                title="Export Printable PDF Accounting Ledger"
+              >
+                <Printer className="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
+                <span className="hidden sm:inline font-bold">PDF</span>
+              </button>
+
+              <button
+                onClick={handleOpenSettings}
+                className="p-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl border border-zinc-800 transition"
+                title="App Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
-          {/* Header Action Buttons */}
-          <div className="flex items-center space-x-1.5">
-            <button
-              onClick={() => setShowPdfReportModal(true)}
-              className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-mono font-medium transition flex items-center space-x-1.5 shadow-xs"
-              title="Export Printable PDF Accounting Ledger"
-            >
-              <Printer className="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
-              <span className="hidden sm:inline font-bold">PDF</span>
-            </button>
+          {/* Desktop/Tablet Header Section: Date Filters + Tab Navigation + Actions */}
+          <div className="flex items-center justify-between md:justify-end gap-3 w-full md:w-auto">
+            {/* Desktop Navigation Tabs */}
+            <div className="hidden md:flex items-center space-x-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800 text-xs">
+              {[
+                { id: 'dashboard', label: 'Overview', icon: PieChart },
+                { id: 'logs', label: 'Trips/Logs', icon: FileText },
+                { id: 'ledger', label: 'Ledger', icon: Receipt },
+                { id: 'analytics', label: 'Reviews', icon: BarChart3 }
+              ].map((tab) => {
+                const IconComponent = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center space-x-1.5 ${
+                      isActive
+                        ? 'bg-amber-400 text-zinc-950 shadow-xs'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <IconComponent className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-            <button
-              onClick={handleOpenSettings}
-              className="p-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl border border-zinc-800 transition"
-              title="App Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
+            {/* Date Filter Segmented Controls */}
+            <div className="flex-1 md:flex-initial flex items-center justify-between space-x-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800/80 text-xs">
+              {(
+                [
+                  { id: 'today', label: 'Today' },
+                  { id: 'this_week', label: 'This Week' },
+                  { id: 'this_month', label: 'This Month' },
+                  { id: 'all', label: 'All Time' }
+                ] as const
+              ).map((filter) => (
+                <button
+                  key={filter.id}
+                  onClick={() => setSelectedDateFilter(filter.id)}
+                  className={`flex-1 md:px-3 py-1.5 rounded-lg font-medium transition text-center whitespace-nowrap ${
+                    selectedDateFilter === filter.id
+                      ? 'bg-amber-400 text-zinc-950 font-bold shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Header Action Buttons (Tablet/Desktop View) */}
+            <div className="hidden md:flex items-center space-x-1.5">
+              <button
+                onClick={() => setShowPdfReportModal(true)}
+                className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-mono font-medium transition flex items-center space-x-1.5 shadow-xs"
+                title="Export Printable PDF Accounting Ledger"
+              >
+                <Printer className="w-3.5 h-3.5 text-amber-400 stroke-[2.5]" />
+                <span className="font-bold">PDF Report</span>
+              </button>
+
+              <button
+                onClick={handleOpenSettings}
+                className="p-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl border border-zinc-800 transition"
+                title="App Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-        </div>
-
-        {/* Date Filter Segmented Controls */}
-        <div className="max-w-md mx-auto mt-2.5 flex items-center justify-between space-x-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800/80 text-xs">
-          {(
-            [
-              { id: 'today', label: 'Today' },
-              { id: 'this_week', label: 'This Week' },
-              { id: 'this_month', label: 'This Month' },
-              { id: 'all', label: 'All Time' }
-            ] as const
-          ).map((filter) => (
-            <button
-              key={filter.id}
-              onClick={() => setSelectedDateFilter(filter.id)}
-              className={`flex-1 py-1.5 rounded-lg font-medium transition text-center ${
-                selectedDateFilter === filter.id
-                  ? 'bg-amber-400 text-zinc-950 font-bold shadow-xs'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              {filter.label}
-            </button>
-          ))}
         </div>
       </header>
 
       {/* ========================================== */}
       {/* MAIN VIEW CONTENT CONTAINER                */}
       {/* ========================================== */}
-      <main className="flex-1 max-w-md w-full mx-auto p-4 pb-28 space-y-4">
+      <main className="flex-1 max-w-md md:max-w-4xl lg:max-w-6xl xl:max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 pb-28 space-y-6">
         {/* ========================================== */}
         {/* VIEW 1: DASHBOARD OVERVIEW                 */}
         {/* ========================================== */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="space-y-5 animate-in fade-in duration-200">
             {/* Owner Greeting Banner */}
             <div className="flex items-center justify-between px-1 pt-1">
               <div>
-                <h2 className="text-base font-extrabold text-white tracking-tight flex items-center space-x-1.5">
+                <h2 className="text-lg font-extrabold text-white tracking-tight flex items-center space-x-1.5">
                   <span>Hello {data.settings.ownerName ? `'${data.settings.ownerName}'` : "'Owner'"}</span>
                   <span className="text-amber-400">👋</span>
                 </h2>
-                <p className="text-[11px] text-zinc-400 font-mono">Here is your fleet performance overview</p>
+                <p className="text-xs text-zinc-400 font-mono">Here is your fleet performance overview</p>
               </div>
             </div>
 
-            {/* Top Stat Card: Net Profit Overview (Minimalist Clean Design) */}
-            <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between space-y-3">
-              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-400 font-mono">
-                <span>NET PROFIT ({selectedDateFilter.replace('_', ' ')})</span>
-                <span className="bg-zinc-800 text-emerald-400 px-2 py-0.5 rounded-full text-[11px] font-mono border border-zinc-700/50">
-                  Gross: {formatCurrency(filteredSummary.grossRevenue, sym)}
-                </span>
+            {/* Top Row: Net Profit Overview Card + Unsettled Collaborator Card (Grid on LG/Desktop) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Top Stat Card: Net Profit Overview (Minimalist Clean Design) */}
+              <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-400 font-mono">
+                  <span>NET PROFIT ({selectedDateFilter.replace('_', ' ')})</span>
+                  <span className="bg-zinc-800 text-emerald-400 px-2.5 py-0.5 rounded-full text-[11px] font-mono border border-zinc-700/50">
+                    Gross: {formatCurrency(filteredSummary.grossRevenue, sym)}
+                  </span>
+                </div>
+
+                <div className="flex items-baseline justify-between">
+                  <div className="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight text-white">
+                    {formatCurrency(filteredSummary.netProfit, sym)}
+                  </div>
+                  <div className="text-xs font-mono text-zinc-400">
+                    {filteredSummary.totalTrips} Total Trips
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[11px] text-zinc-400 font-mono">
+                    <span>Expenses: {formatCurrency(filteredSummary.totalExpenses, sym)}</span>
+                    <span>Margin: {filteredSummary.grossRevenue > 0 ? Math.round((filteredSummary.netProfit / filteredSummary.grossRevenue) * 100) : 0}%</span>
+                  </div>
+                  <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden flex">
+                    <div
+                      className="bg-emerald-400 h-full transition-all duration-500 rounded-full"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, filteredSummary.grossRevenue > 0 ? (filteredSummary.netProfit / filteredSummary.grossRevenue) * 100 : 0))}%`
+                      }}
+                    ></div>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex items-baseline justify-between">
-                <div className="text-3xl font-extrabold font-mono tracking-tight text-white">
-                  {formatCurrency(filteredSummary.netProfit, sym)}
+              {/* UNSETTLED COLLABORATOR BALANCE WIDGET */}
+              <div className="bg-gradient-to-r from-amber-950/80 via-zinc-900 to-zinc-900 border-2 border-amber-500/40 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col justify-between space-y-3 relative overflow-hidden">
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-1.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 animate-bounce" />
+                    <span className="text-xs font-bold text-amber-400 tracking-wider uppercase font-mono">
+                      UNSETTLED COLLABORATOR BALANCE
+                    </span>
+                  </div>
+                  <div className="text-3xl sm:text-4xl font-black font-mono text-white tracking-tight">
+                    {formatCurrency(unsettledCollabBalance, sym)}
+                  </div>
+                  <p className="text-xs text-zinc-300">
+                    Pending payout from Collaborator across <strong className="text-yellow-400 font-mono">{unsettledTripsCount}</strong> un-cleared trip shifts.
+                  </p>
                 </div>
-                <div className="text-xs font-mono text-zinc-400">
-                  {filteredSummary.totalTrips} Total Trips
-                </div>
-              </div>
 
-              {/* Progress Bar */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-[11px] text-zinc-400 font-mono">
-                  <span>Expenses: {formatCurrency(filteredSummary.totalExpenses, sym)}</span>
-                  <span>Margin: {filteredSummary.grossRevenue > 0 ? Math.round((filteredSummary.netProfit / filteredSummary.grossRevenue) * 100) : 0}%</span>
-                </div>
-                <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden flex">
-                  <div
-                    className="bg-emerald-400 h-full transition-all duration-500 rounded-full"
-                    style={{
-                      width: `${Math.min(100, Math.max(0, filteredSummary.grossRevenue > 0 ? (filteredSummary.netProfit / filteredSummary.grossRevenue) * 100 : 0))}%`
+                <div className="flex items-center space-x-2 pt-1">
+                  <button
+                    onClick={() => {
+                      setPaymentForm((prev) => ({ ...prev, amount: unsettledCollabBalance }));
+                      setActiveModal('payment');
                     }}
-                  ></div>
+                    className="flex-1 bg-amber-500 hover:bg-amber-400 text-black font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center space-x-1 transition shadow-md"
+                  >
+                    <DollarSign className="w-4 h-4" />
+                    <span>Record Payout Received</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('ledger')}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center space-x-1 border border-zinc-700 transition"
+                  >
+                    <span>Ledger</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* 4 Minimalist Summary Cards Grid */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* 4 Minimalist Summary Cards Grid (2 cols on Mobile, 4 cols on Tablet/Desktop) */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {/* Card 1: Collab Trips */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 space-y-1 rounded-xl shadow-xs">
+              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs">
                 <div className="flex items-center justify-between text-zinc-400 text-xs font-mono uppercase font-medium">
                   <span className="flex items-center text-amber-400">
                     <Truck className="w-3.5 h-3.5 mr-1" /> Collab
@@ -1419,7 +1513,7 @@ export default function App() {
                     {filteredSummary.collabTripsCount} Trips
                   </span>
                 </div>
-                <div className="text-xl font-mono font-bold text-white">
+                <div className="text-xl sm:text-2xl font-mono font-bold text-white">
                   {formatCurrency(filteredSummary.collabRev, sym)}
                 </div>
                 <div className="text-[10px] text-zinc-500 pt-0.5 font-mono">
@@ -1428,7 +1522,7 @@ export default function App() {
               </div>
 
               {/* Card 2: Private Earnings */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 space-y-1 rounded-xl shadow-xs">
+              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs">
                 <div className="flex items-center justify-between text-zinc-400 text-xs font-mono uppercase font-medium">
                   <span className="flex items-center text-emerald-400">
                     <Briefcase className="w-3.5 h-3.5 mr-1" /> Private
@@ -1437,7 +1531,7 @@ export default function App() {
                     {filteredSummary.privateTripsCount} Trips
                   </span>
                 </div>
-                <div className="text-xl font-mono font-bold text-emerald-400">
+                <div className="text-xl sm:text-2xl font-mono font-bold text-emerald-400">
                   {formatCurrency(filteredSummary.privateRev, sym)}
                 </div>
                 <div className="text-[10px] text-zinc-500 pt-0.5 font-mono">
@@ -1446,7 +1540,7 @@ export default function App() {
               </div>
 
               {/* Card 3: Daily Expenses */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 space-y-1 rounded-xl shadow-xs">
+              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs">
                 <div className="flex items-center justify-between text-zinc-400 text-xs font-mono uppercase font-medium">
                   <span className="flex items-center text-rose-400">
                     <Fuel className="w-3.5 h-3.5 mr-1" /> Expenses
@@ -1455,7 +1549,7 @@ export default function App() {
                     Fuel + Pay
                   </span>
                 </div>
-                <div className="text-xl font-mono font-bold text-rose-400">
+                <div className="text-xl sm:text-2xl font-mono font-bold text-rose-400">
                   {formatCurrency(filteredSummary.totalExpenses, sym)}
                 </div>
                 <div className="text-[10px] text-zinc-500 pt-0.5 font-mono">
@@ -1464,14 +1558,14 @@ export default function App() {
               </div>
 
               {/* Card 4: Operational Metrics */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 space-y-1 rounded-xl shadow-xs">
+              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs">
                 <div className="flex items-center justify-between text-zinc-400 text-xs font-mono uppercase font-medium">
                   <span className="flex items-center text-zinc-300">
                     <TrendingUp className="w-3.5 h-3.5 mr-1" /> Avg/Trip
                   </span>
                   <span className="text-[10px] text-zinc-500 font-mono">Ratio</span>
                 </div>
-                <div className="text-xl font-mono font-bold text-white">
+                <div className="text-xl sm:text-2xl font-mono font-bold text-white">
                   {formatCurrency(filteredSummary.avgRevenuePerTrip, sym)}
                 </div>
                 <div className="text-[10px] text-zinc-500 pt-0.5 font-mono">
@@ -1480,214 +1574,177 @@ export default function App() {
               </div>
             </div>
 
-            {/* FINANCIAL PERFORMANCE TREND GRAPH */}
-            <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <BarChart3 className="w-4 h-4 text-amber-400" />
-                  <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">
-                    Revenue & Expense Area Trend
-                  </h3>
-                </div>
-                <div className="flex items-center space-x-3 text-[10px] font-mono">
-                  <span className="flex items-center space-x-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50"></span>
-                    <span className="text-zinc-300 font-semibold">Revenue</span>
-                  </span>
-                  <span className="flex items-center space-x-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-400 shadow-sm shadow-rose-400/50"></span>
-                    <span className="text-zinc-300 font-semibold">Expenses</span>
-                  </span>
-                </div>
-              </div>
-
-              <div className="h-48 w-full pt-1">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -22, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#34d399" stopOpacity={0.45} />
-                        <stop offset="95%" stopColor="#34d399" stopOpacity={0.0} />
-                      </linearGradient>
-                      <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#fb7185" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#fb7185" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                    <XAxis
-                      dataKey="displayDate"
-                      stroke="#71717a"
-                      fontSize={10}
-                      tickLine={false}
-                      axisLine={{ stroke: '#27272a' }}
-                    />
-                    <YAxis
-                      stroke="#71717a"
-                      fontSize={10}
-                      tickLine={false}
-                      axisLine={false}
-                      tickFormatter={(val) => `${sym}${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#09090b',
-                        borderColor: '#27272a',
-                        borderRadius: '0.75rem',
-                        fontSize: '11px',
-                        fontFamily: 'monospace',
-                        color: '#fff',
-                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'
-                      }}
-                      formatter={(value: any, name: any) => [
-                        `${formatCurrency(Number(value) || 0, sym)}`,
-                        name === 'revenue' ? 'Revenue' : 'Expenses'
-                      ]}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="revenue"
-                      name="revenue"
-                      stroke="#34d399"
-                      strokeWidth={2.5}
-                      fillOpacity={1}
-                      fill="url(#colorRevenue)"
-                      activeDot={{ r: 5, fill: '#34d399', stroke: '#09090b', strokeWidth: 2 }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="expenses"
-                      name="expenses"
-                      stroke="#fb7185"
-                      strokeWidth={2.5}
-                      fillOpacity={1}
-                      fill="url(#colorExpenses)"
-                      activeDot={{ r: 5, fill: '#fb7185', stroke: '#09090b', strokeWidth: 2 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* EXPENSE BREAKDOWN PIE CHART WIDGET */}
-            <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 shadow-xs space-y-3">
-              <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
-                <div className="flex items-center space-x-2">
-                  <PieChart className="w-4 h-4 text-rose-400" />
-                  <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">
-                    Expense Breakdown
-                  </h3>
-                </div>
-                <span className="text-[10px] text-zinc-400 font-mono">
-                  Total: <strong className="text-rose-400">{formatCurrency(filteredSummary.totalExpenses, sym)}</strong>
-                </span>
-              </div>
-
-              {expensePieData.length > 0 ? (
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-                  {/* Donut Pie Chart Container */}
-                  <div className="h-44 w-full sm:w-1/2 relative flex items-center justify-center">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <RechartsPieChart>
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: '#09090b',
-                            borderColor: '#27272a',
-                            borderRadius: '0.75rem',
-                            fontSize: '11px',
-                            fontFamily: 'monospace',
-                            color: '#fff',
-                            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'
-                          }}
-                          formatter={(value: any, name: any) => [
-                            `${formatCurrency(Number(value) || 0, sym)} (${filteredSummary.totalExpenses > 0 ? Math.round((Number(value) / filteredSummary.totalExpenses) * 100) : 0}%)`,
-                            name
-                          ]}
-                        />
-                        <Pie
-                          data={expensePieData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={42}
-                          outerRadius={65}
-                          paddingAngle={3}
-                          dataKey="value"
-                        >
-                          {expensePieData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} stroke="#18181b" strokeWidth={2} />
-                          ))}
-                        </Pie>
-                      </RechartsPieChart>
-                    </ResponsiveContainer>
-                    {/* Donut Center Label */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
-                      <span className="text-[9px] text-zinc-500 font-mono uppercase">Total Spent</span>
-                      <span className="text-xs font-bold font-mono text-white">
-                        {formatCurrency(filteredSummary.totalExpenses, sym)}
-                      </span>
-                    </div>
+            {/* CHARTS SECTION (2 Columns on Desktop) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* FINANCIAL PERFORMANCE TREND GRAPH */}
+              <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <BarChart3 className="w-4 h-4 text-amber-400" />
+                    <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">
+                      Revenue & Expense Area Trend
+                    </h3>
                   </div>
-
-                  {/* Legend & Category breakdown list */}
-                  <div className="w-full sm:w-1/2 space-y-1.5">
-                    {expensePieData.map((item) => (
-                      <div key={item.name} className="flex items-center justify-between text-xs font-mono bg-zinc-950/60 px-2.5 py-1.5 rounded-xl border border-zinc-800/80">
-                        <div className="flex items-center space-x-2">
-                          <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.color }} />
-                          <span className="text-zinc-200 font-medium">{item.name}</span>
-                        </div>
-                        <div className="text-right flex items-center space-x-2">
-                          <span className="font-bold text-white">{formatCurrency(item.value, sym)}</span>
-                          <span className="text-[10px] text-zinc-400 bg-zinc-800/80 px-1.5 py-0.5 rounded border border-zinc-700/50">{item.percentage}%</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="py-6 text-center text-xs font-mono text-zinc-500 bg-zinc-950/40 rounded-xl border border-zinc-800/50">
-                  No expense records logged for this selected period.
-                </div>
-              )}
-            </div>
-
-            {/* UNSETTLED COLLABORATOR BALANCE WIDGET */}
-            <div className="bg-gradient-to-r from-amber-950/80 via-zinc-900 to-zinc-900 border-2 border-amber-500/40 rounded-2xl p-4 shadow-xl space-y-3 relative overflow-hidden">
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center space-x-1.5">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 animate-bounce" />
-                    <span className="text-xs font-bold text-amber-400 tracking-wider uppercase font-mono">
-                      UNSETTLED COLLABORATOR BALANCE
+                  <div className="flex items-center space-x-3 text-[10px] font-mono">
+                    <span className="flex items-center space-x-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50"></span>
+                      <span className="text-zinc-300 font-semibold">Revenue</span>
+                    </span>
+                    <span className="flex items-center space-x-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-400 shadow-sm shadow-rose-400/50"></span>
+                      <span className="text-zinc-300 font-semibold">Expenses</span>
                     </span>
                   </div>
-                  <div className="text-2xl font-black font-mono text-white tracking-tight">
-                    {formatCurrency(unsettledCollabBalance, sym)}
-                  </div>
-                  <p className="text-xs text-zinc-300">
-                    Pending payout from Collaborator across <strong className="text-yellow-400 font-mono">{unsettledTripsCount}</strong> un-cleared trip shifts.
-                  </p>
+                </div>
+
+                <div className="h-52 w-full pt-1">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -22, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#34d399" stopOpacity={0.45} />
+                          <stop offset="95%" stopColor="#34d399" stopOpacity={0.0} />
+                        </linearGradient>
+                        <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#fb7185" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#fb7185" stopOpacity={0.0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                      <XAxis
+                        dataKey="displayDate"
+                        stroke="#71717a"
+                        fontSize={10}
+                        tickLine={false}
+                        axisLine={{ stroke: '#27272a' }}
+                      />
+                      <YAxis
+                        stroke="#71717a"
+                        fontSize={10}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(val) => `${sym}${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#09090b',
+                          borderColor: '#27272a',
+                          borderRadius: '0.75rem',
+                          fontSize: '11px',
+                          fontFamily: 'monospace',
+                          color: '#fff',
+                          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'
+                        }}
+                        formatter={(value: any, name: any) => [
+                          `${formatCurrency(Number(value) || 0, sym)}`,
+                          name === 'revenue' ? 'Revenue' : 'Expenses'
+                        ]}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="revenue"
+                        name="revenue"
+                        stroke="#34d399"
+                        strokeWidth={2.5}
+                        fillOpacity={1}
+                        fill="url(#colorRevenue)"
+                        activeDot={{ r: 5, fill: '#34d399', stroke: '#09090b', strokeWidth: 2 }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="expenses"
+                        name="expenses"
+                        stroke="#fb7185"
+                        strokeWidth={2.5}
+                        fillOpacity={1}
+                        fill="url(#colorExpenses)"
+                        activeDot={{ r: 5, fill: '#fb7185', stroke: '#09090b', strokeWidth: 2 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2 pt-1">
-                <button
-                  onClick={() => {
-                    setPaymentForm((prev) => ({ ...prev, amount: unsettledCollabBalance }));
-                    setActiveModal('payment');
-                  }}
-                  className="flex-1 bg-amber-500 hover:bg-amber-400 text-black font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 transition shadow-md"
-                >
-                  <DollarSign className="w-4 h-4" />
-                  <span>Record Payout Received</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('ledger')}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1 border border-zinc-700 transition"
-                >
-                  <span>Ledger</span>
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+              {/* EXPENSE BREAKDOWN PIE CHART WIDGET */}
+              <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 shadow-xs space-y-3">
+                <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
+                  <div className="flex items-center space-x-2">
+                    <PieChart className="w-4 h-4 text-rose-400" />
+                    <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">
+                      Expense Breakdown
+                    </h3>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    Total: <strong className="text-rose-400">{formatCurrency(filteredSummary.totalExpenses, sym)}</strong>
+                  </span>
+                </div>
+
+                {expensePieData.length > 0 ? (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                    {/* Donut Pie Chart Container */}
+                    <div className="h-44 w-full sm:w-1/2 relative flex items-center justify-center">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RechartsPieChart>
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: '#09090b',
+                              borderColor: '#27272a',
+                              borderRadius: '0.75rem',
+                              fontSize: '11px',
+                              fontFamily: 'monospace',
+                              color: '#fff',
+                              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'
+                            }}
+                            formatter={(value: any, name: any) => [
+                              `${formatCurrency(Number(value) || 0, sym)} (${filteredSummary.totalExpenses > 0 ? Math.round((Number(value) / filteredSummary.totalExpenses) * 100) : 0}%)`,
+                              name
+                            ]}
+                          />
+                          <Pie
+                            data={expensePieData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={42}
+                            outerRadius={65}
+                            paddingAngle={3}
+                            dataKey="value"
+                          >
+                            {expensePieData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} stroke="#18181b" strokeWidth={2} />
+                            ))}
+                          </Pie>
+                        </RechartsPieChart>
+                      </ResponsiveContainer>
+                      {/* Donut Center Label */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                        <span className="text-[9px] text-zinc-500 font-mono uppercase">Total Spent</span>
+                        <span className="text-xs font-bold font-mono text-white">
+                          {formatCurrency(filteredSummary.totalExpenses, sym)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Legend & Category breakdown list */}
+                    <div className="w-full sm:w-1/2 space-y-1.5">
+                      {expensePieData.map((item) => (
+                        <div key={item.name} className="flex items-center justify-between text-xs font-mono bg-zinc-950/60 px-2.5 py-1.5 rounded-xl border border-zinc-800/80">
+                          <div className="flex items-center space-x-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.color }} />
+                            <span className="text-zinc-200 font-medium">{item.name}</span>
+                          </div>
+                          <div className="text-right flex items-center space-x-2">
+                            <span className="font-bold text-white">{formatCurrency(item.value, sym)}</span>
+                            <span className="text-[10px] text-zinc-400 bg-zinc-800/80 px-1.5 py-0.5 rounded border border-zinc-700/50">{item.percentage}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-xs font-mono text-zinc-500 bg-zinc-950/40 rounded-xl border border-zinc-800/50">
+                    No expense records logged for this selected period.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1707,15 +1764,16 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="space-y-2">
-                {combinedActivityStream.slice(0, 5).map((item) => (
+              {/* Grid layout for Activity Cards on Tablet & Laptop */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {combinedActivityStream.slice(0, 6).map((item) => (
                   <div
                     key={item.id}
                     onClick={(e) => {
                       if ((e.target as HTMLElement).closest('button')) return;
                       handleEditItem(item);
                     }}
-                    className="bg-zinc-900 border border-zinc-800 hover:border-amber-500/40 rounded-xl p-3 flex items-center justify-between transition cursor-pointer group"
+                    className="bg-zinc-900 border border-zinc-800 hover:border-amber-500/40 rounded-xl p-3.5 flex items-center justify-between transition cursor-pointer group"
                   >
                     <div className="flex items-center space-x-3">
                       <div
@@ -1792,7 +1850,7 @@ export default function App() {
                 ))}
 
                 {combinedActivityStream.length === 0 && (
-                  <div className="bg-zinc-900 border border-dashed border-zinc-800 rounded-xl p-8 text-center text-zinc-500 text-xs">
+                  <div className="col-span-full bg-zinc-900 border border-dashed border-zinc-800 rounded-xl p-8 text-center text-zinc-500 text-xs">
                     No logs recorded yet. Tap the yellow <span className="text-yellow-400 font-bold">+</span> button below to start logging!
                   </div>
                 )}
@@ -1805,7 +1863,7 @@ export default function App() {
         {/* VIEW 2: TRIPS & LOGS MANAGER              */}
         {/* ========================================== */}
         {activeTab === 'logs' && (
-          <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="space-y-5 animate-in fade-in duration-200">
             {/* Header & Filter Segment */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -1818,51 +1876,54 @@ export default function App() {
                 </span>
               </div>
 
-              {/* Search input */}
-              <div className="relative">
-                <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by customer, note, or date..."
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-yellow-500/50"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-2.5 text-zinc-500 hover:text-zinc-300"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
+              {/* Search & Category Tabs Controls Bar */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Search input */}
+                <div className="relative md:col-span-1">
+                  <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search customer, note, date..."
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-yellow-500/50"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-2.5 text-zinc-500 hover:text-zinc-300"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
 
-              {/* Category tabs */}
-              <div className="flex items-center space-x-1 bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs font-mono">
-                {[
-                  { id: 'all', label: 'All' },
-                  { id: 'collab', label: 'Collab 🚚' },
-                  { id: 'private', label: 'Private 💼' },
-                  { id: 'expense', label: 'Expenses ⛽' }
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setLogsCategory(tab.id as any)}
-                    className={`flex-1 py-1.5 rounded-lg font-semibold transition ${
-                      logsCategory === tab.id
-                        ? 'bg-yellow-500 text-black shadow-sm'
-                        : 'text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+                {/* Category tabs */}
+                <div className="md:col-span-2 flex items-center space-x-1 bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs font-mono">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'collab', label: 'Collab 🚚' },
+                    { id: 'private', label: 'Private 💼' },
+                    { id: 'expense', label: 'Expenses ⛽' }
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setLogsCategory(tab.id as any)}
+                      className={`flex-1 py-1.5 rounded-lg font-semibold transition text-center ${
+                        logsCategory === tab.id
+                          ? 'bg-yellow-500 text-black shadow-sm'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* List of Filtered Logs */}
-            <div className="space-y-2.5">
+            {/* List of Filtered Logs (Grid on Tablet / Desktop) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
               {filteredLogsList.map((item) => (
                 <div
                   key={item.id}
@@ -2031,7 +2092,7 @@ export default function App() {
                 <span className="text-[10px] text-zinc-500 font-normal">Tap payout to record payment</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
                 {collaboratorBalances
                   .filter((cb) => selectedLedgerCollabId === 'all' || cb.id === selectedLedgerCollabId)
                   .map((cb) => (
@@ -2243,145 +2304,151 @@ export default function App() {
               </span>
             </div>
 
-            {/* Revenue Comparison: Primary vs Private */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
-              <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider font-mono flex items-center justify-between">
-                <span>Revenue Source Breakdown</span>
-                <span className="text-yellow-400 font-mono">{formatCurrency(filteredSummary.grossRevenue, sym)}</span>
-              </h3>
+            {/* Grid layout for Desktop / Tablet */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Left Column: Revenue Breakdown & Efficiency Metrics & Utilities */}
+              <div className="space-y-4">
+                {/* Revenue Comparison: Primary vs Private */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
+                  <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider font-mono flex items-center justify-between">
+                    <span>Revenue Source Breakdown</span>
+                    <span className="text-yellow-400 font-mono">{formatCurrency(filteredSummary.grossRevenue, sym)}</span>
+                  </h3>
 
-              {/* Progress visual bar */}
-              <div className="space-y-1.5">
-                <div className="w-full bg-zinc-800 rounded-full h-3 overflow-hidden flex">
-                  <div
-                    className="bg-yellow-500 h-full transition-all duration-500"
-                    style={{
-                      width: `${filteredSummary.grossRevenue > 0 ? (filteredSummary.collabRev / filteredSummary.grossRevenue) * 100 : 50}%`
-                    }}
-                  ></div>
-                  <div
-                    className="bg-cyan-400 h-full transition-all duration-500"
-                    style={{
-                      width: `${filteredSummary.grossRevenue > 0 ? (filteredSummary.privateRev / filteredSummary.grossRevenue) * 100 : 50}%`
-                    }}
-                  ></div>
-                </div>
+                  {/* Progress visual bar */}
+                  <div className="space-y-1.5">
+                    <div className="w-full bg-zinc-800 rounded-full h-3 overflow-hidden flex">
+                      <div
+                        className="bg-yellow-500 h-full transition-all duration-500"
+                        style={{
+                          width: `${filteredSummary.grossRevenue > 0 ? (filteredSummary.collabRev / filteredSummary.grossRevenue) * 100 : 50}%`
+                        }}
+                      ></div>
+                      <div
+                        className="bg-cyan-400 h-full transition-all duration-500"
+                        style={{
+                          width: `${filteredSummary.grossRevenue > 0 ? (filteredSummary.privateRev / filteredSummary.grossRevenue) * 100 : 50}%`
+                        }}
+                      ></div>
+                    </div>
 
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <div className="flex items-center space-x-1 text-yellow-400">
-                    <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                    <span>Primary Collab: {formatCurrency(filteredSummary.collabRev, sym)} ({filteredSummary.grossRevenue > 0 ? Math.round((filteredSummary.collabRev / filteredSummary.grossRevenue) * 100) : 0}%)</span>
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <div className="flex items-center space-x-1 text-yellow-400">
+                        <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
+                        <span>Collab: {formatCurrency(filteredSummary.collabRev, sym)} ({filteredSummary.grossRevenue > 0 ? Math.round((filteredSummary.collabRev / filteredSummary.grossRevenue) * 100) : 0}%)</span>
+                      </div>
+                      <div className="flex items-center space-x-1 text-cyan-400">
+                        <div className="w-2.5 h-2.5 rounded-full bg-cyan-400"></div>
+                        <span>Private: {formatCurrency(filteredSummary.privateRev, sym)} ({filteredSummary.grossRevenue > 0 ? Math.round((filteredSummary.privateRev / filteredSummary.grossRevenue) * 100) : 0}%)</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-1 text-cyan-400">
-                    <div className="w-2.5 h-2.5 rounded-full bg-cyan-400"></div>
-                    <span>Private: {formatCurrency(filteredSummary.privateRev, sym)} ({filteredSummary.grossRevenue > 0 ? Math.round((filteredSummary.privateRev / filteredSummary.grossRevenue) * 100) : 0}%)</span>
+                </div>
+
+                {/* Key Operational Efficiency Metrics */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3.5 space-y-1">
+                    <span className="text-[10px] text-zinc-400 font-mono uppercase">Avg Revenue / Trip</span>
+                    <div className="text-lg font-black text-white font-mono">
+                      {formatCurrency(filteredSummary.avgRevenuePerTrip, sym)}
+                    </div>
+                    <p className="text-[10px] text-zinc-500">Across {filteredSummary.totalTrips} trips</p>
+                  </div>
+
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3.5 space-y-1">
+                    <span className="text-[10px] text-zinc-400 font-mono uppercase">Fuel Cost Ratio</span>
+                    <div className="text-lg font-black text-amber-400 font-mono">
+                      {Math.round(filteredSummary.fuelCostRatio)}%
+                    </div>
+                    <p className="text-[10px] text-zinc-500">Of gross revenue spent on fuel</p>
+                  </div>
+                </div>
+
+                {/* DATA BACKUP & RESET CONTROLS */}
+                <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 space-y-3">
+                  <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider font-mono">
+                    Data Backup & Utility
+                  </h3>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      onClick={handleExportData}
+                      className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 px-3 rounded-lg flex items-center justify-center space-x-1.5 border border-zinc-700 transition"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Export JSON</span>
+                    </button>
+
+                    <label className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 px-3 rounded-lg flex items-center justify-center space-x-1.5 border border-zinc-700 transition cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Import Backup</span>
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={handleImportData}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  <button
+                    onClick={handleResetData}
+                    className="w-full bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1.5 border border-rose-800/50 transition font-mono"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset to Sample Data</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Profit & Loss Statement Breakdown */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3 h-fit">
+                <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider font-mono">
+                  P&L Statement ({selectedDateFilter.replace('_', ' ')})
+                </h3>
+
+                <div className="space-y-2 text-xs font-mono">
+                  <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-300">
+                    <span>Gross Primary Collab Earnings</span>
+                    <span className="text-white">{formatCurrency(filteredSummary.collabRev, sym)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-300">
+                    <span>Gross Private Trip Earnings</span>
+                    <span className="text-white">{formatCurrency(filteredSummary.privateRev, sym)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 font-bold text-yellow-400 border-b border-zinc-700">
+                    <span>TOTAL GROSS REVENUE</span>
+                    <span>{formatCurrency(filteredSummary.grossRevenue, sym)}</span>
+                  </div>
+
+                  <div className="pt-2 text-[11px] text-zinc-500 uppercase font-bold">OPERATIONAL EXPENSES</div>
+                  <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
+                    <span>Fuel (Diesel) Total</span>
+                    <span className="text-rose-400">-{formatCurrency(filteredSummary.totalFuel, sym)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
+                    <span>Driver Pay & Allowance</span>
+                    <span className="text-rose-400">-{formatCurrency(filteredSummary.totalDriverPay, sym)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
+                    <span>Servicing & Parts</span>
+                    <span className="text-rose-400">-{formatCurrency(filteredSummary.totalServicing, sym)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
+                    <span>Tolls & Highway Charges</span>
+                    <span className="text-rose-400">-{formatCurrency(filteredSummary.totalTolls, sym)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
+                    <span>Miscellaneous</span>
+                    <span className="text-rose-400">-{formatCurrency(filteredSummary.totalMisc, sym)}</span>
+                  </div>
+
+                  <div className="flex justify-between py-2 text-sm font-black text-emerald-400 border-t border-yellow-500/30 pt-2">
+                    <span>NET OPERATING PROFIT</span>
+                    <span>{formatCurrency(filteredSummary.netProfit, sym)}</span>
                   </div>
                 </div>
               </div>
-            </div>
-
-            {/* Profit & Loss Statement Breakdown */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
-              <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider font-mono">
-                P&L Statement ({selectedDateFilter.replace('_', ' ')})
-              </h3>
-
-              <div className="space-y-2 text-xs font-mono">
-                <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-300">
-                  <span>Gross Primary Collab Earnings</span>
-                  <span className="text-white">{formatCurrency(filteredSummary.collabRev, sym)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-300">
-                  <span>Gross Private Trip Earnings</span>
-                  <span className="text-white">{formatCurrency(filteredSummary.privateRev, sym)}</span>
-                </div>
-                <div className="flex justify-between py-1 font-bold text-yellow-400 border-b border-zinc-700">
-                  <span>TOTAL GROSS REVENUE</span>
-                  <span>{formatCurrency(filteredSummary.grossRevenue, sym)}</span>
-                </div>
-
-                <div className="pt-2 text-[11px] text-zinc-500 uppercase font-bold">OPERATIONAL EXPENSES</div>
-                <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
-                  <span>Fuel (Diesel) Total</span>
-                  <span className="text-rose-400">-{formatCurrency(filteredSummary.totalFuel, sym)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
-                  <span>Driver Pay & Allowance</span>
-                  <span className="text-rose-400">-{formatCurrency(filteredSummary.totalDriverPay, sym)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
-                  <span>Servicing & Parts</span>
-                  <span className="text-rose-400">-{formatCurrency(filteredSummary.totalServicing, sym)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
-                  <span>Tolls & Highway Charges</span>
-                  <span className="text-rose-400">-{formatCurrency(filteredSummary.totalTolls, sym)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-zinc-800 text-zinc-400">
-                  <span>Miscellaneous</span>
-                  <span className="text-rose-400">-{formatCurrency(filteredSummary.totalMisc, sym)}</span>
-                </div>
-
-                <div className="flex justify-between py-2 text-sm font-black text-emerald-400 border-t border-yellow-500/30 pt-2">
-                  <span>NET OPERATING PROFIT</span>
-                  <span>{formatCurrency(filteredSummary.netProfit, sym)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Key Operational Efficiency Metrics */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3.5 space-y-1">
-                <span className="text-[10px] text-zinc-400 font-mono uppercase">Avg Revenue / Trip</span>
-                <div className="text-lg font-black text-white font-mono">
-                  {formatCurrency(filteredSummary.avgRevenuePerTrip, sym)}
-                </div>
-                <p className="text-[10px] text-zinc-500">Across {filteredSummary.totalTrips} trips</p>
-              </div>
-
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3.5 space-y-1">
-                <span className="text-[10px] text-zinc-400 font-mono uppercase">Fuel Cost Ratio</span>
-                <div className="text-lg font-black text-amber-400 font-mono">
-                  {Math.round(filteredSummary.fuelCostRatio)}%
-                </div>
-                <p className="text-[10px] text-zinc-500">Of gross revenue spent on fuel</p>
-              </div>
-            </div>
-
-            {/* DATA BACKUP & RESET CONTROLS */}
-            <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 space-y-3">
-              <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider font-mono">
-                Data Backup & Utility
-              </h3>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <button
-                  onClick={handleExportData}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 px-3 rounded-lg flex items-center justify-center space-x-1.5 border border-zinc-700 transition"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Export JSON</span>
-                </button>
-
-                <label className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 px-3 rounded-lg flex items-center justify-center space-x-1.5 border border-zinc-700 transition cursor-pointer">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Import Backup</span>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={handleImportData}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              <button
-                onClick={handleResetData}
-                className="w-full bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 py-2 px-3 rounded-lg text-xs flex items-center justify-center space-x-1.5 border border-rose-800/50 transition font-mono"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset to Sample Data</span>
-              </button>
             </div>
           </div>
         )}
@@ -2477,7 +2544,7 @@ export default function App() {
       {/* BOTTOM NAVIGATION TAB BAR                  */}
       {/* ========================================== */}
       <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 z-30 px-3 py-2">
-        <div className="max-w-md mx-auto grid grid-cols-4 gap-1.5">
+        <div className="max-w-md md:max-w-xl mx-auto grid grid-cols-4 gap-2">
           {[
             { id: 'dashboard', label: 'Overview', icon: PieChart },
             { id: 'logs', label: 'Trips/Logs', icon: FileText },
