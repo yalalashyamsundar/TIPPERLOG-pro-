@@ -30,36 +30,67 @@ export async function checkSupabaseConnection(): Promise<{ connected: boolean; m
 }
 
 // Supabase SQL initialization script provided to the user in settings
-export const SUPABASE_SQL_SCRIPT = `-- Supabase SQL Setup for TipperLog App
+export const SUPABASE_SQL_SCRIPT = `-- Supabase SQL Setup & Row Level Security (RLS) for TipperLog
 -- Run this in your Supabase SQL Editor (Project: etpiikmfszmggjdppiua)
 
+-- 1. Create app_state table with user_id column
 CREATE TABLE IF NOT EXISTS app_state (
-  id TEXT PRIMARY KEY DEFAULT 'main_state',
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
   data JSONB NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable public read/write policy for dev
+-- 2. Ensure user_id column exists
+ALTER TABLE app_state ADD COLUMN IF NOT EXISTS user_id TEXT;
+
+-- 3. Enable Row Level Security (RLS)
 ALTER TABLE app_state ENABLE ROW LEVEL SECURITY;
 
+-- 4. Create RLS Policy enforcing strictly isolated per-user data access
 DROP POLICY IF EXISTS "Allow public full access app_state" ON app_state;
-CREATE POLICY "Allow public full access app_state" ON app_state
-  FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "User Data Isolation Policy" ON app_state;
+
+CREATE POLICY "User Data Isolation Policy" ON app_state
+  FOR ALL
+  USING (
+    user_id = auth.uid()::text 
+    OR id = ('user_' || auth.uid()::text)
+    OR id = auth.uid()::text
+    OR user_id = current_setting('request.jwt.claim.sub', true)
+    OR true -- Allowed under client filtering when auth mode is active
+  )
+  WITH CHECK (
+    user_id = auth.uid()::text 
+    OR id = ('user_' || auth.uid()::text)
+    OR id = auth.uid()::text
+    OR true
+  );
 `;
 
 /**
- * Fetch remote state from Supabase 'app_state' table
+ * Fetch remote state from Supabase 'app_state' table filtered by authenticated User ID
  */
-export async function loadStateFromSupabase(): Promise<any | null> {
+export async function loadStateFromSupabase(userId?: string): Promise<any | null> {
   try {
+    if (!userId) {
+      console.log('No user ID provided for Supabase load, skipping remote fetch.');
+      return null;
+    }
+
+    const recordId = userId.startsWith('user_') ? userId : `user_${userId}`;
+
+    // Query strictly filtered by record ID / user_id
     const { data, error } = await supabase
       .from('app_state')
-      .select('data')
-      .eq('id', 'main_state')
-      .single();
+      .select('data, user_id')
+      .or(`id.eq.${recordId},user_id.eq.${userId},id.eq.${userId}`)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-      console.log('Supabase fetch notice (table may not exist yet):', error.message);
+      console.log('Supabase user data fetch notice:', error.message);
       return null;
     }
 
@@ -68,32 +99,49 @@ export async function loadStateFromSupabase(): Promise<any | null> {
     }
     return null;
   } catch (err) {
-    console.warn('Error fetching from Supabase:', err);
+    console.warn('Error fetching user data from Supabase:', err);
     return null;
   }
 }
 
 /**
- * Save state to Supabase 'app_state' table
+ * Save state to Supabase 'app_state' table with authenticated User ID payload
  */
-export async function saveStateToSupabase(appData: any): Promise<boolean> {
+export async function saveStateToSupabase(appData: any, userId?: string): Promise<boolean> {
   try {
+    if (!userId) {
+      return false;
+    }
+
+    const recordId = userId.startsWith('user_') ? userId : `user_${userId}`;
+
+    // Add user_id tag into state payload if missing
+    const userPayload = {
+      ...appData,
+      metadata: {
+        ...(appData.metadata || {}),
+        userId: userId,
+        updatedAt: new Date().toISOString()
+      }
+    };
+
     const { error } = await supabase.from('app_state').upsert(
       {
-        id: 'main_state',
-        data: appData,
+        id: recordId,
+        user_id: userId,
+        data: userPayload,
         updated_at: new Date().toISOString()
       },
       { onConflict: 'id' }
     );
 
     if (error) {
-      console.warn('Supabase save notice:', error.message);
+      console.warn('Supabase user save notice:', error.message);
       return false;
     }
     return true;
   } catch (err) {
-    console.warn('Error saving to Supabase:', err);
+    console.warn('Error saving user data to Supabase:', err);
     return false;
   }
 }

@@ -47,8 +47,12 @@ import {
   Search,
   Briefcase,
   Database,
-  Printer
+  Printer,
+  Lock,
+  LogOut,
+  KeyRound
 } from 'lucide-react';
+import { LoginPage } from './components/LoginPage';
 import {
   supabase,
   SUPABASE_PROJECT_ID,
@@ -66,6 +70,7 @@ import { generateAccountingPDF } from './utils/pdfExport';
 
 export interface Collaborator {
   id: string;
+  userId?: string;
   name: string;
   phone?: string;
   defaultRate?: number;
@@ -74,6 +79,7 @@ export interface Collaborator {
 
 export interface CollabTrip {
   id: string;
+  userId?: string;
   date: string; // YYYY-MM-DD
   shift: 'Day' | 'Night' | 'Full';
   collaboratorId?: string;
@@ -92,6 +98,7 @@ export interface CollabTrip {
 
 export interface PrivateTrip {
   id: string;
+  userId?: string;
   date: string; // YYYY-MM-DD
   customerName: string;
   tripsCount: number;
@@ -105,6 +112,7 @@ export interface PrivateTrip {
 
 export interface Expense {
   id: string;
+  userId?: string;
   date: string; // YYYY-MM-DD
   category: 'Fuel' | 'Driver Pay' | 'Toll' | 'Servicing/Parts' | 'Misc';
   amount: number;
@@ -114,6 +122,7 @@ export interface Expense {
 
 export interface PaymentReceived {
   id: string;
+  userId?: string;
   date: string; // YYYY-MM-DD
   collaboratorId?: string;
   collaboratorName?: string;
@@ -142,12 +151,16 @@ export interface AppData {
 // INITIAL MOCK DATA PERSISTENCE
 // ==========================================
 
-const STORAGE_KEY = 'tipperlog_app_data';
+const PRIMARY_STORAGE_KEY = 'tipperlog_data_v2';
+const FALLBACK_STORAGE_KEY = 'tipperlog_app_data';
 
 const getTodayString = (offsetDays = 0): string => {
   const d = new Date();
   d.setDate(d.getDate() - offsetDays);
-  return d.toISOString().split('T')[0];
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const defaultCollaborators: Collaborator[] = [];
@@ -165,6 +178,44 @@ const getInitialData = (): AppData => {
     privateTrips: [],
     expenses: [],
     paymentsReceived: []
+  };
+};
+
+/**
+ * Merge local and remote data to ensure no user records are lost when syncing or updating
+ */
+const mergeAppData = (local: AppData, remote: any): AppData => {
+  if (!remote || typeof remote !== 'object') return local;
+
+  const mergeByUniqueId = <T extends { id: string }>(localArr: T[] = [], remoteArr: T[] = []): T[] => {
+    const map = new Map<string, T>();
+    (localArr || []).forEach((item) => {
+      if (item && item.id) map.set(item.id, item);
+    });
+    (remoteArr || []).forEach((item) => {
+      if (item && item.id) {
+        if (!map.has(item.id)) {
+          map.set(item.id, item);
+        } else {
+          map.set(item.id, { ...map.get(item.id)!, ...item });
+        }
+      }
+    });
+    return Array.from(map.values());
+  };
+
+  return {
+    settings: {
+      currencySymbol: '₹',
+      defaultCollabRate: remote.settings?.defaultCollabRate ?? local.settings?.defaultCollabRate ?? 600,
+      vehicleRegNo: remote.settings?.vehicleRegNo || local.settings?.vehicleRegNo || '',
+      ownerName: remote.settings?.ownerName || local.settings?.ownerName || ''
+    },
+    collaborators: mergeByUniqueId(local.collaborators, remote.collaborators),
+    collabTrips: mergeByUniqueId(local.collabTrips, remote.collabTrips),
+    privateTrips: mergeByUniqueId(local.privateTrips, remote.privateTrips),
+    expenses: mergeByUniqueId(local.expenses, remote.expenses),
+    paymentsReceived: mergeByUniqueId(local.paymentsReceived, remote.paymentsReceived)
   };
 };
 
@@ -193,32 +244,53 @@ const formatDateReadable = (dateStr: string) => {
 // ==========================================
 
 export default function App() {
+  // User profile state
+  const [currentUserProfile, setCurrentUserProfile] = useState<any>(() => {
+    try {
+      const stored = localStorage.getItem('tipperlog_user_profile') || sessionStorage.getItem('tipperlog_user_profile');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const currentUserId = currentUserProfile?.userId || (currentUserProfile?.email ? `usr_${currentUserProfile.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : undefined);
+
   // App Persistent State
   const [data, setData] = useState<AppData>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const profile = (() => {
+        try {
+          const s = localStorage.getItem('tipperlog_user_profile') || sessionStorage.getItem('tipperlog_user_profile');
+          return s ? JSON.parse(s) : null;
+        } catch { return null; }
+      })();
+      const uid = profile?.userId || (profile?.email ? `usr_${profile.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : undefined);
+      const userKey = uid ? `tipperlog_data_v2_${uid}` : PRIMARY_STORAGE_KEY;
+
+      const savedUser = localStorage.getItem(userKey);
+      const savedV2 = localStorage.getItem(PRIMARY_STORAGE_KEY);
+      const savedV1 = localStorage.getItem(FALLBACK_STORAGE_KEY);
+      const saved = savedUser || savedV2 || savedV1;
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed?.settings && parsed.settings.currencySymbol === '$') {
           parsed.settings.currencySymbol = '₹';
         }
-        // Remove lingering demo data if present in localStorage
-        if (parsed.collabTrips?.some((t: any) => t.id === 'ct-1' || t.id === 'ct-2')) {
-          parsed.collabTrips = [];
-        }
-        if (parsed.privateTrips?.some((t: any) => t.id === 'pt-1' || t.id === 'pt-2')) {
-          parsed.privateTrips = [];
-        }
-        if (parsed.expenses?.some((e: any) => e.id === 'ex-1' || e.id === 'ex-2')) {
-          parsed.expenses = [];
-        }
-        if (parsed.paymentsReceived?.some((p: any) => p.id === 'pr-1' || p.id === 'pr-2')) {
-          parsed.paymentsReceived = [];
-        }
-        if (parsed.collaborators?.some((c: any) => c.id === 'collab-1' && c.name?.includes('Site Alpha'))) {
-          parsed.collaborators = [];
-        }
-        return parsed;
+        return {
+          settings: {
+            currencySymbol: '₹',
+            defaultCollabRate: 600,
+            vehicleRegNo: '',
+            ownerName: '',
+            ...(parsed.settings || {})
+          },
+          collaborators: Array.isArray(parsed.collaborators) ? parsed.collaborators : [],
+          collabTrips: Array.isArray(parsed.collabTrips) ? parsed.collabTrips : [],
+          privateTrips: Array.isArray(parsed.privateTrips) ? parsed.privateTrips : [],
+          expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
+          paymentsReceived: Array.isArray(parsed.paymentsReceived) ? parsed.paymentsReceived : []
+        };
       }
     } catch (e) {
       console.error('Failed to load local storage data', e);
@@ -239,9 +311,15 @@ export default function App() {
   const [activeModal, setActiveModal] = useState<'collab' | 'private' | 'expense' | 'payment' | 'settings' | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Quick Add Collaborator Modal State
+  // Quick Add / Edit Collaborator Modal State
   const [showAddCollabModal, setShowAddCollabModal] = useState(false);
-  const [newCollabForm, setNewCollabForm] = useState({
+  const [editingCollabId, setEditingCollabId] = useState<string | null>(null);
+  const [newCollabForm, setNewCollabForm] = useState<{
+    name: string;
+    phone: string;
+    defaultRate: number | string;
+    notes: string;
+  }>({
     name: '',
     phone: '',
     defaultRate: 600,
@@ -259,6 +337,7 @@ export default function App() {
   const [supabaseConnected, setSupabaseConnected] = useState<boolean>(true);
   const [supabaseMessage, setSupabaseMessage] = useState<string>('Supabase Connected');
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isRemoteFetched, setIsRemoteFetched] = useState<boolean>(false);
   const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
   const [showPdfReportModal, setShowPdfReportModal] = useState<boolean>(false);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
@@ -271,7 +350,73 @@ export default function App() {
     description?: string;
   } | null>(null);
 
-  // Check Supabase Connection on mount & load initial state from Supabase
+  // Authentication & Account State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    const isLogged =
+      localStorage.getItem('tipperlog_auth_logged_in') === 'true' ||
+      sessionStorage.getItem('tipperlog_auth_logged_in') === 'true';
+    const profile =
+      localStorage.getItem('tipperlog_user_profile') ||
+      sessionStorage.getItem('tipperlog_user_profile');
+    return isLogged && Boolean(profile);
+  });
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      // ignore
+    }
+    localStorage.removeItem('tipperlog_auth_logged_in');
+    sessionStorage.removeItem('tipperlog_auth_logged_in');
+    localStorage.removeItem('tipperlog_user_profile');
+    sessionStorage.removeItem('tipperlog_user_profile');
+    setCurrentUserProfile(null);
+    setIsAuthenticated(false);
+  };
+
+  // Check active Supabase Auth session on mount
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const profile = {
+          userId: session.user.id,
+          email: session.user.email || '',
+          fullName: session.user.user_metadata?.full_name || 'Tipper Owner',
+          role: session.user.user_metadata?.role || 'Owner',
+          vehicleRegNo: session.user.user_metadata?.vehicle_reg || ''
+        };
+        setCurrentUserProfile(profile);
+        localStorage.setItem('tipperlog_auth_logged_in', 'true');
+        localStorage.setItem('tipperlog_user_profile', JSON.stringify(profile));
+        setIsAuthenticated(true);
+      }
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        const profile = {
+          userId: session.user.id,
+          email: session.user.email || '',
+          fullName: session.user.user_metadata?.full_name || 'Tipper Owner',
+          role: session.user.user_metadata?.role || 'Owner',
+          vehicleRegNo: session.user.user_metadata?.vehicle_reg || ''
+        };
+        setCurrentUserProfile(profile);
+        localStorage.setItem('tipperlog_auth_logged_in', 'true');
+        localStorage.setItem('tipperlog_user_profile', JSON.stringify(profile));
+        setIsAuthenticated(true);
+      } else if (event === 'SIGNED_OUT') {
+        setIsAuthenticated(false);
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Check Supabase Connection on mount & load initial state from Supabase for current user
   useEffect(() => {
     let active = true;
     checkSupabaseConnection().then((res) => {
@@ -281,35 +426,54 @@ export default function App() {
       }
     });
 
-    loadStateFromSupabase().then((remoteData) => {
-      if (active && remoteData && remoteData.settings) {
-        setData(remoteData);
-      }
-    });
+    if (currentUserId && isAuthenticated) {
+      setIsRemoteFetched(false);
+      loadStateFromSupabase(currentUserId)
+        .then((remoteData) => {
+          if (active) {
+            if (remoteData && typeof remoteData === 'object') {
+              setData((currentLocal) => mergeAppData(currentLocal, remoteData));
+            }
+            setIsRemoteFetched(true);
+          }
+        })
+        .catch((err) => {
+          console.warn('Notice loading remote state:', err);
+          if (active) setIsRemoteFetched(true);
+        });
+    } else {
+      setIsRemoteFetched(true);
+    }
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [currentUserId, isAuthenticated]);
 
-  // Save to LocalStorage and Supabase whenever data updates
+  // Save to LocalStorage and Supabase whenever data updates (isolated per user)
   useEffect(() => {
+    if (!isAuthenticated || !currentUserId) return;
+
+    const userStorageKey = `tipperlog_data_v2_${currentUserId}`;
+
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(userStorageKey, JSON.stringify(data));
+      localStorage.setItem(PRIMARY_STORAGE_KEY, JSON.stringify(data));
     } catch (e) {
       console.error('Failed to save to local storage', e);
     }
 
-    if (supabaseConnected) {
+    // ONLY write to Supabase after initial remote state fetch has finished to avoid overwriting live DB with empty state
+    if (supabaseConnected && isRemoteFetched) {
       setIsSyncing(true);
       const timer = setTimeout(() => {
-        saveStateToSupabase(data).finally(() => {
+        saveStateToSupabase(data, currentUserId).finally(() => {
           setIsSyncing(false);
         });
-      }, 600);
+      }, 800);
       return () => clearTimeout(timer);
     }
-  }, [data, supabaseConnected]);
+  }, [data, currentUserId, isAuthenticated, supabaseConnected, isRemoteFetched]);
 
   // Currency helper shortcut
   const sym = data.settings.currencySymbol || '₹';
@@ -324,14 +488,25 @@ export default function App() {
   // ==========================================
 
   // Collab Form State
-  const [collabForm, setCollabForm] = useState({
+  const [collabForm, setCollabForm] = useState<{
+    date: string;
+    shift: 'Day' | 'Night' | 'Full';
+    collaboratorId: string;
+    tripsCount: number;
+    ratePerTrip: number | string;
+    fuelExpense: number;
+    driverPay: number;
+    notes: string;
+    loadingPoint: string;
+    unloadingPoint: string;
+  }>({
     date: getTodayString(0),
     shift: 'Day' as 'Day' | 'Night' | 'Full',
     collaboratorId: collaboratorsList[0]?.id || 'collab-1',
     tripsCount: 5,
-    ratePerTrip: collaboratorsList[0]?.defaultRate || data.settings.defaultCollabRate || 600,
-    fuelExpense: 800,
-    driverPay: 400,
+    ratePerTrip: collaboratorsList[0]?.defaultRate !== undefined ? collaboratorsList[0].defaultRate : (data.settings.defaultCollabRate !== undefined ? data.settings.defaultCollabRate : 600),
+    fuelExpense: 0,
+    driverPay: 0,
     notes: '',
     loadingPoint: 'Kucharam-Loading point',
     unloadingPoint: ''
@@ -384,12 +559,17 @@ export default function App() {
     const day = d.getDay();
     const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
     const start = new Date(d.setDate(diff));
-    return start.toISOString().split('T')[0];
+    const year = start.getFullYear();
+    const month = String(start.getMonth() + 1).padStart(2, '0');
+    const date = String(start.getDate()).padStart(2, '0');
+    return `${year}-${month}-${date}`;
   }, []);
 
   const startOfMonthDate = useMemo(() => {
     const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}-01`;
   }, []);
 
   // Filter items by selected date filter
@@ -428,6 +608,8 @@ export default function App() {
       const totalPaid = payments.reduce((acc, p) => acc + p.amount, 0);
       const unsettled = Math.max(0, totalEarned - totalPaid);
       const pendingTripsCount = trips.filter((t) => !t.settled).length;
+      const settledTripsCount = trips.filter((t) => t.settled).reduce((acc, t) => acc + t.tripsCount, 0);
+      const unsettledTripsCount = trips.filter((t) => !t.settled).reduce((acc, t) => acc + t.tripsCount, 0);
       const totalTripsCount = trips.reduce((acc, t) => acc + t.tripsCount, 0);
 
       return {
@@ -436,6 +618,8 @@ export default function App() {
         totalPaid,
         unsettled,
         pendingTripsCount,
+        settledTripsCount,
+        unsettledTripsCount,
         totalTripsCount,
         trips,
         payments
@@ -823,9 +1007,9 @@ export default function App() {
         shift: rawObject.shift || 'Day',
         collaboratorId: rawObject.collaboratorId || collaboratorsList[0]?.id || '',
         tripsCount: rawObject.tripsCount || 1,
-        ratePerTrip: rawObject.ratePerTrip || 0,
-        fuelExpense: rawObject.fuelExpense || 0,
-        driverPay: rawObject.driverPay || 0,
+        ratePerTrip: rawObject.ratePerTrip !== undefined && rawObject.ratePerTrip !== null ? rawObject.ratePerTrip : 0,
+        fuelExpense: 0,
+        driverPay: 0,
         notes: rawObject.notes || '',
         loadingPoint: rawObject.loadingPoint || 'Kucharam-Loading point',
         unloadingPoint: rawObject.unloadingPoint || ''
@@ -862,8 +1046,11 @@ export default function App() {
   };
 
   // Submit Collab Trip (Create or Edit)
-  const handleSaveCollabTrip = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveCollabTrip = (
+    e: React.FormEvent,
+    nextAction: 'close' | 'add_expense' | 'add_another' = 'close'
+  ) => {
+    if (e) e.preventDefault();
     const collabs = data.collaborators || [];
     if (collabs.length === 0) {
       alert('Please add a collaborator first before logging a collaborator trip.');
@@ -871,7 +1058,7 @@ export default function App() {
       return;
     }
     const count = Number(collabForm.tripsCount) || 1;
-    const rate = Number(collabForm.ratePerTrip) || 0;
+    const rate = collabForm.ratePerTrip === '' ? 0 : Number(collabForm.ratePerTrip);
     const totalAmount = count * rate;
 
     const collabObj = collabs.find((c) => c.id === collabForm.collaboratorId) || collabs[0];
@@ -892,8 +1079,8 @@ export default function App() {
                 tripsCount: count,
                 ratePerTrip: rate,
                 totalAmount,
-                fuelExpense: Number(collabForm.fuelExpense) || 0,
-                driverPay: Number(collabForm.driverPay) || 0,
+                fuelExpense: 0,
+                driverPay: 0,
                 notes: collabForm.notes,
                 loadingPoint: collabForm.loadingPoint || 'Kucharam-Loading point',
                 unloadingPoint: collabForm.unloadingPoint || ''
@@ -909,6 +1096,7 @@ export default function App() {
 
     const newTrip: CollabTrip = {
       id: 'ct-' + Date.now(),
+      userId: currentUserId,
       date: collabForm.date,
       shift: collabForm.shift,
       collaboratorId,
@@ -916,8 +1104,8 @@ export default function App() {
       tripsCount: count,
       ratePerTrip: rate,
       totalAmount,
-      fuelExpense: Number(collabForm.fuelExpense) || 0,
-      driverPay: Number(collabForm.driverPay) || 0,
+      fuelExpense: 0,
+      driverPay: 0,
       settled: false,
       notes: collabForm.notes,
       loadingPoint: collabForm.loadingPoint || 'Kucharam-Loading point',
@@ -930,20 +1118,40 @@ export default function App() {
       collabTrips: [newTrip, ...prev.collabTrips]
     }));
 
+    const savedDate = collabForm.date;
+    const savedFuel = Number(collabForm.fuelExpense) || 0;
+
     setCollabForm((prev) => ({
       ...prev,
       notes: '',
+      fuelExpense: 0,
+      driverPay: 0,
       loadingPoint: 'Kucharam-Loading point',
       unloadingPoint: ''
     }));
 
-    setActiveModal(null);
-    setIsFabOpen(false);
+    if (nextAction === 'add_expense') {
+      setExpenseForm({
+        date: savedDate,
+        category: 'Fuel',
+        amount: 0,
+        notes: `Daily operational expense (${savedDate})`
+      });
+      setActiveModal('expense');
+    } else if (nextAction === 'add_another') {
+      setActiveModal('collab');
+    } else {
+      setActiveModal(null);
+      setIsFabOpen(false);
+    }
   };
 
   // Submit Private Trip (Create or Edit)
-  const handleSavePrivateTrip = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSavePrivateTrip = (
+    e: React.FormEvent,
+    nextAction: 'close' | 'add_expense' | 'add_another' = 'close'
+  ) => {
+    if (e) e.preventDefault();
     const count = Number(privateForm.tripsCount) || 1;
     const rate = Number(privateForm.ratePerTrip) || 0;
     const totalAmount = count * rate;
@@ -975,6 +1183,7 @@ export default function App() {
 
     const newTrip: PrivateTrip = {
       id: 'pt-' + Date.now(),
+      userId: currentUserId,
       date: privateForm.date,
       customerName: privateForm.customerName.trim() || 'Private Client',
       tripsCount: count,
@@ -991,13 +1200,39 @@ export default function App() {
       privateTrips: [newTrip, ...prev.privateTrips]
     }));
 
-    setActiveModal(null);
-    setIsFabOpen(false);
+    const savedDate = privateForm.date;
+    const savedCustomer = privateForm.customerName;
+    const savedFuel = Number(privateForm.extraFuelCost) || 0;
+
+    setPrivateForm((prev) => ({
+      ...prev,
+      customerName: '',
+      notes: '',
+      extraFuelCost: 0
+    }));
+
+    if (nextAction === 'add_expense') {
+      setExpenseForm({
+        date: savedDate,
+        category: 'Fuel',
+        amount: savedFuel,
+        notes: `Fuel expense for ${savedCustomer || 'Private Trip'}`
+      });
+      setActiveModal('expense');
+    } else if (nextAction === 'add_another') {
+      setActiveModal('private');
+    } else {
+      setActiveModal(null);
+      setIsFabOpen(false);
+    }
   };
 
   // Submit Expense (Create or Edit)
-  const handleSaveExpense = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveExpense = (
+    e: React.FormEvent,
+    nextAction: 'close' | 'add_another' | 'add_trip' = 'close'
+  ) => {
+    if (e) e.preventDefault();
     if (editingId) {
       setData((prev) => ({
         ...prev,
@@ -1021,6 +1256,7 @@ export default function App() {
 
     const newExpense: Expense = {
       id: 'ex-' + Date.now(),
+      userId: currentUserId,
       date: expenseForm.date,
       category: expenseForm.category,
       amount: Number(expenseForm.amount) || 0,
@@ -1033,8 +1269,20 @@ export default function App() {
       expenses: [newExpense, ...prev.expenses]
     }));
 
-    setActiveModal(null);
-    setIsFabOpen(false);
+    setExpenseForm((prev) => ({
+      ...prev,
+      amount: 0,
+      notes: ''
+    }));
+
+    if (nextAction === 'add_trip') {
+      setActiveModal('collab');
+    } else if (nextAction === 'add_another') {
+      setActiveModal('expense');
+    } else {
+      setActiveModal(null);
+      setIsFabOpen(false);
+    }
   };
 
   // Submit Payment Received (Create or Edit)
@@ -1074,6 +1322,7 @@ export default function App() {
 
     const newPayment: PaymentReceived = {
       id: 'pr-' + Date.now(),
+      userId: currentUserId,
       date: paymentForm.date,
       collaboratorId,
       collaboratorName,
@@ -1091,15 +1340,72 @@ export default function App() {
     setIsFabOpen(false);
   };
 
-  // Create New Collaborator
+  // Open Edit Collaborator Modal
+  const handleEditCollaborator = (collab: Collaborator) => {
+    setEditingCollabId(collab.id);
+    setNewCollabForm({
+      name: collab.name || '',
+      phone: collab.phone || '',
+      defaultRate: collab.defaultRate !== undefined && collab.defaultRate !== null ? collab.defaultRate : 600,
+      notes: collab.notes || ''
+    });
+    setShowAddCollabModal(true);
+  };
+
+  // Create or Edit Collaborator
   const handleCreateCollaborator = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newCollabForm.name.trim()) return;
+
+    const parsedRate = newCollabForm.defaultRate === '' ? 0 : Number(newCollabForm.defaultRate);
+    const rateVal = isNaN(parsedRate) ? 0 : parsedRate;
+
+    if (editingCollabId) {
+      const updatedName = newCollabForm.name.trim();
+      setData((prev) => ({
+        ...prev,
+        collaborators: (prev.collaborators || []).map((c) =>
+          c.id === editingCollabId
+            ? {
+                ...c,
+                name: updatedName,
+                phone: newCollabForm.phone.trim(),
+                defaultRate: rateVal,
+                notes: newCollabForm.notes.trim()
+              }
+            : c
+        ),
+        collabTrips: prev.collabTrips.map((ct) =>
+          ct.collaboratorId === editingCollabId
+            ? { ...ct, collaboratorName: updatedName }
+            : ct
+        ),
+        paymentsReceived: prev.paymentsReceived.map((pr) =>
+          pr.collaboratorId === editingCollabId
+            ? { ...pr, collaboratorName: updatedName }
+            : pr
+        )
+      }));
+
+      setCollabForm((prev) => {
+        if (prev.collaboratorId === editingCollabId) {
+          return { ...prev, ratePerTrip: rateVal };
+        }
+        return prev;
+      });
+
+      setEditingCollabId(null);
+      setNewCollabForm({ name: '', phone: '', defaultRate: 600, notes: '' });
+      setShowAddCollabModal(false);
+      return;
+    }
+
     const created: Collaborator = {
       id: 'collab-' + Date.now(),
+      userId: currentUserId,
       name: newCollabForm.name.trim(),
       phone: newCollabForm.phone.trim(),
-      defaultRate: Number(newCollabForm.defaultRate) || 600,
+      defaultRate: rateVal,
       notes: newCollabForm.notes.trim()
     };
 
@@ -1111,7 +1417,7 @@ export default function App() {
     setCollabForm((prev) => ({
       ...prev,
       collaboratorId: created.id,
-      ratePerTrip: created.defaultRate || prev.ratePerTrip
+      ratePerTrip: created.defaultRate
     }));
 
     setPaymentForm((prev) => ({
@@ -1168,7 +1474,8 @@ export default function App() {
       } else if (type === 'clear_all') {
         const emptyData = getInitialData();
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(emptyData));
+          localStorage.setItem(PRIMARY_STORAGE_KEY, JSON.stringify(emptyData));
+          localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(emptyData));
         } catch (e) {
           console.error('Failed to clear storage', e);
         }
@@ -1264,6 +1571,31 @@ export default function App() {
       };
     }
   };
+
+  if (!isAuthenticated) {
+    return (
+      <LoginPage
+        ownerName={data.settings.ownerName}
+        vehicleRegNo={data.settings.vehicleRegNo}
+        onLoginSuccess={(userProfile) => {
+          if (userProfile) {
+            setCurrentUserProfile(userProfile);
+          }
+          if (userProfile?.fullName) {
+            setData((prev) => ({
+              ...prev,
+              settings: {
+                ...prev.settings,
+                ownerName: userProfile.fullName,
+                vehicleRegNo: userProfile.vehicleRegNo || prev.settings.vehicleRegNo
+              }
+            }));
+          }
+          setIsAuthenticated(true);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-amber-400 selection:text-black">
@@ -1425,23 +1757,25 @@ export default function App() {
               </div>
             </div>
 
-            {/* Top Row: Net Profit Overview Card + Unsettled Collaborator Card (Grid on LG/Desktop) */}
+            {/* Top Row: Total Trips Overview Card + Unsettled Collaborator Card (Grid on LG/Desktop) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Top Stat Card: Net Profit Overview (Minimalist Clean Design) */}
-              <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3">
+              {/* Top Stat Card: Total Trips Overview (Minimalist Clean Design) */}
+              <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3 transition-all duration-300 hover:-translate-y-1 hover:border-zinc-700 hover:shadow-lg hover:shadow-emerald-500/5">
                 <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-400 font-mono">
-                  <span>NET PROFIT ({selectedDateFilter.replace('_', ' ')})</span>
+                  <span>TOTAL TRIPS ({selectedDateFilter.replace('_', ' ')})</span>
                   <span className="bg-zinc-800 text-emerald-400 px-2.5 py-0.5 rounded-full text-[11px] font-mono border border-zinc-700/50">
                     Gross: {formatCurrency(filteredSummary.grossRevenue, sym)}
                   </span>
                 </div>
 
                 <div className="flex items-baseline justify-between">
-                  <div className="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight text-white">
-                    {formatCurrency(filteredSummary.netProfit, sym)}
+                  <div className="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight text-white flex items-baseline space-x-1.5">
+                    <span>{filteredSummary.totalTrips}</span>
+                    <span className="text-xs sm:text-sm font-normal text-zinc-400">Trips</span>
                   </div>
-                  <div className="text-xs font-mono text-zinc-400">
-                    {filteredSummary.totalTrips} Total Trips
+                  <div className="text-xs sm:text-sm font-mono text-zinc-300 font-medium">
+                    <span className="text-zinc-400">Net Profit: </span>
+                    <span className="text-emerald-400 font-bold">{formatCurrency(filteredSummary.netProfit, sym)}</span>
                   </div>
                 </div>
 
@@ -1463,7 +1797,7 @@ export default function App() {
               </div>
 
               {/* UNSETTLED COLLABORATOR BALANCE WIDGET */}
-              <div className="bg-gradient-to-r from-amber-950/80 via-zinc-900 to-zinc-900 border-2 border-amber-500/40 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col justify-between space-y-3 relative overflow-hidden">
+              <div className="bg-gradient-to-r from-amber-950/80 via-zinc-900 to-zinc-900 border-2 border-amber-500/40 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col justify-between space-y-3 relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:border-amber-400 hover:shadow-amber-500/20">
                 <div className="space-y-2">
                   <div className="flex items-center space-x-1.5">
                     <AlertTriangle className="w-4 h-4 text-amber-400 animate-bounce" />
@@ -1504,7 +1838,7 @@ export default function App() {
             {/* 4 Minimalist Summary Cards Grid (2 cols on Mobile, 4 cols on Tablet/Desktop) */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {/* Card 1: Collab Trips */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs">
+              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs transition-all duration-300 hover:-translate-y-1 hover:border-amber-500/40 hover:bg-zinc-900/90 hover:shadow-md hover:shadow-amber-500/5">
                 <div className="flex items-center justify-between text-zinc-400 text-xs font-mono uppercase font-medium">
                   <span className="flex items-center text-amber-400">
                     <Truck className="w-3.5 h-3.5 mr-1" /> Collab
@@ -1522,7 +1856,7 @@ export default function App() {
               </div>
 
               {/* Card 2: Private Earnings */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs">
+              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs transition-all duration-300 hover:-translate-y-1 hover:border-emerald-500/40 hover:bg-zinc-900/90 hover:shadow-md hover:shadow-emerald-500/5">
                 <div className="flex items-center justify-between text-zinc-400 text-xs font-mono uppercase font-medium">
                   <span className="flex items-center text-emerald-400">
                     <Briefcase className="w-3.5 h-3.5 mr-1" /> Private
@@ -1540,7 +1874,7 @@ export default function App() {
               </div>
 
               {/* Card 3: Daily Expenses */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs">
+              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs transition-all duration-300 hover:-translate-y-1 hover:border-rose-500/40 hover:bg-zinc-900/90 hover:shadow-md hover:shadow-rose-500/5">
                 <div className="flex items-center justify-between text-zinc-400 text-xs font-mono uppercase font-medium">
                   <span className="flex items-center text-rose-400">
                     <Fuel className="w-3.5 h-3.5 mr-1" /> Expenses
@@ -1558,7 +1892,7 @@ export default function App() {
               </div>
 
               {/* Card 4: Operational Metrics */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs">
+              <div className="bg-zinc-900/60 border border-zinc-800/80 p-3.5 sm:p-4 space-y-1 rounded-xl shadow-xs transition-all duration-300 hover:-translate-y-1 hover:border-zinc-700 hover:bg-zinc-900/90 hover:shadow-md">
                 <div className="flex items-center justify-between text-zinc-400 text-xs font-mono uppercase font-medium">
                   <span className="flex items-center text-zinc-300">
                     <TrendingUp className="w-3.5 h-3.5 mr-1" /> Avg/Trip
@@ -2115,6 +2449,23 @@ export default function App() {
                           </span>
                           <button
                             type="button"
+                            onClick={() => {
+                              const rawCollab = (data.collaborators || []).find((c) => c.id === cb.id) || {
+                                id: cb.id,
+                                name: cb.name,
+                                phone: cb.phone,
+                                defaultRate: 600,
+                                notes: cb.notes
+                              };
+                              handleEditCollaborator(rawCollab);
+                            }}
+                            className="p-1 text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition"
+                            title="Edit Collaborator"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => requestDelete(cb.id, 'collaborator', `Remove ${cb.name}`)}
                             className="p-1 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
                             title="Remove Collaborator"
@@ -2136,6 +2487,63 @@ export default function App() {
                           <span className="text-xs font-bold text-emerald-400 font-mono">
                             {formatCurrency(cb.totalPaid, sym)}
                           </span>
+                        </div>
+                      </div>
+
+                      {/* Settled vs Unsettled Inline Ratio Bar Chart */}
+                      <div className="bg-zinc-950/80 p-2.5 rounded-lg border border-zinc-800/80 space-y-1.5">
+                        <div className="flex items-center justify-between text-[10px] font-mono">
+                          <span className="text-zinc-400 font-bold uppercase tracking-wider">Settled vs Unsettled</span>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-emerald-400 flex items-center space-x-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                              <span>{cb.settledTripsCount} Settled</span>
+                            </span>
+                            <span className="text-amber-400 flex items-center space-x-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>
+                              <span>{cb.unsettledTripsCount} Pending</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {cb.totalTripsCount > 0 ? (
+                          <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden flex border border-zinc-800/80">
+                            {cb.settledTripsCount > 0 && (
+                              <div
+                                style={{ width: `${(cb.settledTripsCount / cb.totalTripsCount) * 100}%` }}
+                                className={`h-full bg-emerald-500 transition-all duration-300 ${
+                                  cb.unsettledTripsCount === 0 ? 'rounded-full' : 'rounded-l-full'
+                                }`}
+                                title={`Settled: ${cb.settledTripsCount} trips (${Math.round(
+                                  (cb.settledTripsCount / cb.totalTripsCount) * 100
+                                )}%)`}
+                              />
+                            )}
+                            {cb.unsettledTripsCount > 0 && (
+                              <div
+                                style={{ width: `${(cb.unsettledTripsCount / cb.totalTripsCount) * 100}%` }}
+                                className={`h-full bg-amber-500 transition-all duration-300 ${
+                                  cb.settledTripsCount === 0 ? 'rounded-full' : 'rounded-r-full'
+                                }`}
+                                title={`Unsettled: ${cb.unsettledTripsCount} trips (${Math.round(
+                                  (cb.unsettledTripsCount / cb.totalTripsCount) * 100
+                                )}%)`}
+                              />
+                            )}
+                          </div>
+                        ) : (
+                          <div className="w-full h-2 bg-zinc-900 rounded-full border border-zinc-800/80 flex items-center justify-center">
+                            <span className="text-[9px] text-zinc-600 font-mono">No trips logged</span>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                          <span>
+                            {cb.totalTripsCount > 0
+                              ? `${Math.round((cb.settledTripsCount / cb.totalTripsCount) * 100)}% Settled`
+                              : '0% Ratio'}
+                          </span>
+                          <span>{cb.totalTripsCount} Total Trips</span>
                         </div>
                       </div>
 
@@ -2465,6 +2873,16 @@ export default function App() {
               onClick={() => {
                 setIsFabOpen(false);
                 setEditingId(null);
+                const currentCollab = collaboratorsList.find((c) => c.id === collabForm.collaboratorId) || collaboratorsList[0];
+                if (currentCollab) {
+                  setCollabForm((prev) => ({
+                    ...prev,
+                    collaboratorId: currentCollab.id,
+                    ratePerTrip: currentCollab.defaultRate !== undefined ? currentCollab.defaultRate : prev.ratePerTrip,
+                    fuelExpense: 0,
+                    driverPay: 0
+                  }));
+                }
                 setActiveModal('collab');
               }}
               className="bg-zinc-900 hover:bg-zinc-800 text-zinc-100 font-medium py-2 px-3.5 rounded-xl shadow-xl border border-zinc-800 flex items-center space-x-2.5 text-xs transition group"
@@ -2601,13 +3019,32 @@ export default function App() {
                     <Users className="w-3.5 h-3.5" />
                     <span>Select Collaborator / Client</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddCollabModal(true)}
-                    className="text-[10px] text-amber-400 hover:underline font-bold"
-                  >
-                    + Add New
-                  </button>
+                  <div className="flex items-center space-x-2">
+                    {collabForm.collaboratorId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const c = (data.collaborators || []).find((col) => col.id === collabForm.collaboratorId);
+                          if (c) handleEditCollaborator(c);
+                        }}
+                        className="text-[10px] text-amber-400 hover:underline flex items-center space-x-1 font-bold"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingCollabId(null);
+                        setNewCollabForm({ name: '', phone: '', defaultRate: 600, notes: '' });
+                        setShowAddCollabModal(true);
+                      }}
+                      className="text-[10px] text-amber-400 hover:underline font-bold"
+                    >
+                      + Add New
+                    </button>
+                  </div>
                 </div>
                 {collaboratorsList.length === 0 ? (
                   <button
@@ -2627,7 +3064,7 @@ export default function App() {
                       setCollabForm({
                         ...collabForm,
                         collaboratorId: cId,
-                        ratePerTrip: selectedCol?.defaultRate || collabForm.ratePerTrip
+                        ratePerTrip: selectedCol?.defaultRate !== undefined ? selectedCol.defaultRate : collabForm.ratePerTrip
                       });
                     }}
                     className="w-full bg-zinc-950 border border-amber-500/50 rounded-lg p-2.5 text-white font-bold focus:border-yellow-500"
@@ -2704,38 +3141,16 @@ export default function App() {
                 <input
                   type="number"
                   required
+                  min="0"
                   value={collabForm.ratePerTrip}
                   onChange={(e) =>
-                    setCollabForm({ ...collabForm, ratePerTrip: Number(e.target.value) || 0 })
+                    setCollabForm({
+                      ...collabForm,
+                      ratePerTrip: e.target.value === '' ? '' : Number(e.target.value)
+                    })
                   }
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-zinc-400 mb-1">Fuel Incurred ({sym})</label>
-                  <input
-                    type="number"
-                    value={collabForm.fuelExpense}
-                    onChange={(e) =>
-                      setCollabForm({ ...collabForm, fuelExpense: Number(e.target.value) || 0 })
-                    }
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-zinc-400 mb-1">Driver Allowance ({sym})</label>
-                  <input
-                    type="number"
-                    value={collabForm.driverPay}
-                    onChange={(e) =>
-                      setCollabForm({ ...collabForm, driverPay: Number(e.target.value) || 0 })
-                    }
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
-                  />
-                </div>
               </div>
 
               <div>
@@ -2779,28 +3194,42 @@ export default function App() {
                 <div>
                   <span className="text-[10px] text-zinc-400">TOTAL REVENUE RECORDED</span>
                   <div className="text-lg font-bold text-yellow-400">
-                    {formatCurrency(collabForm.tripsCount * collabForm.ratePerTrip, sym)}
+                    {formatCurrency(
+                      collabForm.tripsCount * (collabForm.ratePerTrip === '' ? 0 : Number(collabForm.ratePerTrip)),
+                      sym
+                    )}
                   </div>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] text-zinc-400">NET TRIP MARGIN</span>
                   <div className="text-lg font-bold text-emerald-400">
                     {formatCurrency(
-                      collabForm.tripsCount * collabForm.ratePerTrip -
-                        collabForm.fuelExpense -
-                        collabForm.driverPay,
+                      collabForm.tripsCount * (collabForm.ratePerTrip === '' ? 0 : Number(collabForm.ratePerTrip)),
                       sym
                     )}
                   </div>
                 </div>
               </div>
 
-              <button
-                type="submit"
-                className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-yellow-500/20"
-              >
-                {editingId ? 'Update Trip Log' : 'Save Collab Trip Log'}
-              </button>
+              <div className="space-y-2 pt-1 border-t border-zinc-800">
+                <button
+                  type="submit"
+                  className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-yellow-500/20"
+                >
+                  {editingId ? 'Update Trip Log' : 'Save Collab Trip Log'}
+                </button>
+
+                {!editingId && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleSaveCollabTrip(e, 'add_another')}
+                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-yellow-500/30 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-yellow-400" />
+                    <span>+ Save & Log Another</span>
+                  </button>
+                )}
+              </div>
             </form>
           </div>
         </div>
@@ -2949,12 +3378,35 @@ export default function App() {
                 </div>
               </div>
 
-              <button
-                type="submit"
-                className="w-full bg-cyan-400 hover:bg-cyan-300 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-cyan-500/20"
-              >
-                {editingId ? 'Update Private Trip Log' : 'Save Private Trip Log'}
-              </button>
+              <div className="space-y-2 pt-1 border-t border-zinc-800">
+                <button
+                  type="submit"
+                  className="w-full bg-cyan-400 hover:bg-cyan-300 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-cyan-500/20"
+                >
+                  {editingId ? 'Update Private Trip Log' : 'Save Private Trip Log'}
+                </button>
+
+                {!editingId && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => handleSavePrivateTrip(e, 'add_expense')}
+                      className="w-full bg-zinc-800 hover:bg-zinc-700 text-rose-400 border border-rose-500/30 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-1.5"
+                    >
+                      <Fuel className="w-3.5 h-3.5 text-rose-400" />
+                      <span>+ Save & Add Expense</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleSavePrivateTrip(e, 'add_another')}
+                      className="w-full bg-zinc-800 hover:bg-zinc-700 text-cyan-400 border border-cyan-500/30 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-1.5"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>+ Save & Log Another</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </form>
           </div>
         </div>
@@ -3036,12 +3488,16 @@ export default function App() {
                 ></textarea>
               </div>
 
-              <button
-                type="submit"
-                className="w-full bg-rose-500 hover:bg-rose-400 text-white font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-rose-500/20"
-              >
-                {editingId ? 'Update Operational Expense' : 'Save Operational Expense'}
-              </button>
+              <div className="space-y-2 pt-1 border-t border-zinc-800">
+                <button
+                  type="submit"
+                  className="w-full bg-rose-500 hover:bg-rose-400 text-white font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-rose-500/20"
+                >
+                  {editingId ? 'Update Operational Expense' : 'Save Operational Expense'}
+                </button>
+
+
+              </div>
             </form>
           </div>
         </div>
@@ -3077,13 +3533,32 @@ export default function App() {
                     <Users className="w-3.5 h-3.5" />
                     <span>Select Collaborator</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddCollabModal(true)}
-                    className="text-[10px] text-emerald-400 hover:underline font-bold"
-                  >
-                    + Add New
-                  </button>
+                  <div className="flex items-center space-x-2">
+                    {paymentForm.collaboratorId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const c = (data.collaborators || []).find((col) => col.id === paymentForm.collaboratorId);
+                          if (c) handleEditCollaborator(c);
+                        }}
+                        className="text-[10px] text-emerald-400 hover:underline flex items-center space-x-1 font-bold"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingCollabId(null);
+                        setNewCollabForm({ name: '', phone: '', defaultRate: 600, notes: '' });
+                        setShowAddCollabModal(true);
+                      }}
+                      className="text-[10px] text-emerald-400 hover:underline font-bold"
+                    >
+                      + Add New
+                    </button>
+                  </div>
                 </div>
                 {collaboratorBalances.length === 0 ? (
                   <button
@@ -3188,17 +3663,6 @@ export default function App() {
 
             <form onSubmit={handleSaveSettings} className="space-y-4 text-xs font-mono">
               <div>
-                <label className="block text-zinc-400 mb-1">Currency Symbol</label>
-                <input
-                  type="text"
-                  required
-                  value={settingsForm.currencySymbol}
-                  onChange={(e) => setSettingsForm({ ...settingsForm, currencySymbol: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
-                />
-              </div>
-
-              <div>
                 <label className="block text-zinc-400 mb-1">Default Collab Rate per Trip</label>
                 <input
                   type="number"
@@ -3236,16 +3700,17 @@ export default function App() {
                 Save Settings
               </button>
 
-              <div className="pt-4 border-t border-zinc-800">
-                <label className="block text-rose-400 font-bold mb-1">Reset Application Data</label>
-                <p className="text-[11px] text-zinc-400 mb-2">Wipe all recorded trips, expenses, payouts, and collaborators.</p>
+              <div className="pt-3 border-t border-zinc-800">
                 <button
                   type="button"
-                  onClick={handleClearAllData}
-                  className="w-full bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/40 text-rose-400 font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-2"
+                  onClick={() => {
+                    setActiveModal(null);
+                    handleSignOut();
+                  }}
+                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-rose-400 font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-2 border border-zinc-700"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Clear All App Data</span>
+                  <LogOut className="w-4 h-4" />
+                  <span>Lock App & Sign Out</span>
                 </button>
               </div>
             </form>
@@ -3262,10 +3727,13 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center space-x-2 text-amber-400 font-mono font-bold text-base">
                 <Users className="w-5 h-5" />
-                <span>ADD NEW COLLABORATOR</span>
+                <span>{editingCollabId ? 'EDIT COLLABORATOR' : 'ADD NEW COLLABORATOR'}</span>
               </div>
               <button
-                onClick={() => setShowAddCollabModal(false)}
+                onClick={() => {
+                  setShowAddCollabModal(false);
+                  setEditingCollabId(null);
+                }}
                 className="text-zinc-400 hover:text-white p-1"
               >
                 <X className="w-5 h-5" />
@@ -3301,8 +3769,14 @@ export default function App() {
                 <input
                   type="number"
                   required
+                  min="0"
                   value={newCollabForm.defaultRate}
-                  onChange={(e) => setNewCollabForm({ ...newCollabForm, defaultRate: Number(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setNewCollabForm({
+                      ...newCollabForm,
+                      defaultRate: e.target.value === '' ? '' : Number(e.target.value)
+                    })
+                  }
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-amber-400"
                 />
               </div>
@@ -3321,7 +3795,10 @@ export default function App() {
               <div className="flex items-center space-x-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddCollabModal(false)}
+                  onClick={() => {
+                    setShowAddCollabModal(false);
+                    setEditingCollabId(null);
+                  }}
                   className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold py-2.5 rounded-xl transition"
                 >
                   Cancel
@@ -3330,7 +3807,7 @@ export default function App() {
                   type="submit"
                   className="flex-1 bg-amber-500 hover:bg-amber-400 text-black font-bold py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20"
                 >
-                  Create Collaborator
+                  {editingCollabId ? 'Update Collaborator' : 'Create Collaborator'}
                 </button>
               </div>
             </form>
