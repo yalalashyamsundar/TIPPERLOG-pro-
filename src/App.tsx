@@ -68,7 +68,7 @@ import {
   saveStateToSupabase,
   SUPABASE_SQL_SCRIPT
 } from './lib/supabase';
-import { generateAccountingPDF } from './utils/pdfExport';
+import { generateAccountingPDF, generateCollaboratorsPDF } from './utils/pdfExport';
 
 // ==========================================
 // TYPES & INTERFACES
@@ -553,6 +553,8 @@ export default function App() {
   const [isRemoteFetched, setIsRemoteFetched] = useState<boolean>(false);
   const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
   const [showPdfReportModal, setShowPdfReportModal] = useState<boolean>(false);
+  const [pdfReportType, setPdfReportType] = useState<'overall' | 'collab'>('overall');
+  const [pdfSelectedCollabId, setPdfSelectedCollabId] = useState<string>('all');
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
 
   // Custom Delete Confirmation Modal State
@@ -747,7 +749,7 @@ export default function App() {
     fuelExpense: 0,
     driverPay: 0,
     notes: '',
-    loadingPoint: 'Kucharam',
+    loadingPoint: '',
     unloadingPoint: ''
   });
 
@@ -1148,7 +1150,7 @@ export default function App() {
     data.collabTrips.forEach((c) => {
       const cName = c.collaboratorName || (data.collaborators || defaultCollaborators).find((col) => col.id === c.collaboratorId)?.name || 'Collaborator';
       const routeText = (c.loadingPoint || c.unloadingPoint)
-        ? ` • Route: ${c.loadingPoint || 'Kucharam'}${c.unloadingPoint ? ` ➔ ${c.unloadingPoint}` : ''}`
+        ? ` • Route: ${c.loadingPoint || ''}${c.unloadingPoint ? ` ➔ ${c.unloadingPoint}` : ''}`
         : '';
       const displayTitle = c.unloadingPoint?.trim()
         ? `${c.unloadingPoint.trim()} (${c.shift} Shift)`
@@ -1254,7 +1256,7 @@ export default function App() {
         fuelExpense: 0,
         driverPay: 0,
         notes: rawObject.notes || '',
-        loadingPoint: rawObject.loadingPoint || 'Kucharam-Loading point',
+        loadingPoint: rawObject.loadingPoint || '',
         unloadingPoint: rawObject.unloadingPoint || ''
       });
       setActiveModal('collab');
@@ -1322,7 +1324,7 @@ export default function App() {
                 fuelExpense: 0,
                 driverPay: 0,
                 notes: collabForm.notes,
-                loadingPoint: collabForm.loadingPoint || 'Kucharam-Loading point',
+                loadingPoint: collabForm.loadingPoint || '',
                 unloadingPoint: collabForm.unloadingPoint || ''
               }
             : t
@@ -1357,7 +1359,7 @@ export default function App() {
       driverPay: 0,
       settled: false,
       notes: collabForm.notes,
-      loadingPoint: collabForm.loadingPoint || 'Kucharam',
+      loadingPoint: collabForm.loadingPoint || '',
       unloadingPoint: collabForm.unloadingPoint || '',
       timestamp: Date.now()
     };
@@ -1374,7 +1376,7 @@ export default function App() {
       notes: '',
       fuelExpense: 0,
       driverPay: 0,
-      loadingPoint: 'Kucharam',
+      loadingPoint: '',
       unloadingPoint: ''
     }));
 
@@ -1759,17 +1761,34 @@ export default function App() {
         return { ...prev, paymentsReceived: prev.paymentsReceived.filter((i) => i.id !== id) };
       } else if (type === 'collaborator') {
         return { ...prev, collaborators: (prev.collaborators || []).filter((c) => c.id !== id) };
-      } else if (type === 'clear_all') {
+      } else if ((type as string) === 'remove_all_collaborators') {
+        return { ...prev, collaborators: [] };
+      } else if (type === 'clear_all' || type === 'reset_sample') {
         const emptyData = getInitialData();
         try {
+          localStorage.removeItem(PRIMARY_STORAGE_KEY);
+          localStorage.removeItem(FALLBACK_STORAGE_KEY);
+          if (currentUserId) {
+            localStorage.removeItem(`tipperlog_data_v2_${currentUserId}`);
+          }
+          // Remove all tipperlog stored keys
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (k && (k.startsWith('tipperlog_data') || k.startsWith('tipperlog_app'))) {
+              localStorage.removeItem(k);
+            }
+          }
           localStorage.setItem(PRIMARY_STORAGE_KEY, JSON.stringify(emptyData));
-          localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(emptyData));
         } catch (e) {
           console.error('Failed to clear storage', e);
         }
+
+        if (supabaseConnected && currentUserId) {
+          saveStateToSupabase(emptyData, currentUserId).catch((err) => {
+            console.warn('Notice clearing remote state in Supabase:', err);
+          });
+        }
         return emptyData;
-      } else if (type === 'reset_sample') {
-        return getInitialData();
       }
       return prev;
     });
@@ -1783,6 +1802,16 @@ export default function App() {
   // Delete Collaborator
   const handleDeleteCollaborator = (id: string) => {
     requestDelete(id, 'collaborator');
+  };
+
+  // Remove All Collaborators
+  const handleRemoveAllCollaborators = () => {
+    setDeleteConfirmTarget({
+      id: 'remove_all_collaborators',
+      type: 'remove_all_collaborators' as any,
+      title: 'Remove All Collaborators',
+      description: 'Are you sure you want to remove all collaborators from your app? Their associated trip records will remain in logs, but all collaborator profiles will be cleared.'
+    });
   };
 
   // Clear / Reset All App Data
@@ -2529,7 +2558,11 @@ export default function App() {
               </h2>
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => setShowPdfReportModal(true)}
+                  onClick={() => {
+                    setPdfReportType('collab');
+                    setPdfSelectedCollabId(selectedLedgerCollabId);
+                    setShowPdfReportModal(true);
+                  }}
                   className="bg-zinc-800 hover:bg-zinc-700 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-lg text-xs font-mono font-bold flex items-center space-x-1 transition shadow-xs"
                 >
                   <Printer className="w-3.5 h-3.5" />
@@ -2542,6 +2575,16 @@ export default function App() {
                   <Plus className="w-3.5 h-3.5" />
                   <span>New</span>
                 </button>
+                {(data.collaborators || []).length > 0 && (
+                  <button
+                    onClick={handleRemoveAllCollaborators}
+                    className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2.5 py-1 rounded-lg text-xs font-mono font-bold flex items-center space-x-1 transition"
+                    title="Remove All Collaborators"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear All</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2700,21 +2743,35 @@ export default function App() {
                             {formatCurrency(cb.unsettled, sym)}
                           </span>
                         </div>
-                        <button
-                          onClick={() => {
-                            setPaymentForm({
-                              date: getTodayString(0),
-                              collaboratorId: cb.id,
-                              amount: cb.unsettled || 500,
-                              referenceNote: `Payout for ${cb.name}`
-                            });
-                            setActiveModal('payment');
-                          }}
-                          className="bg-amber-500 hover:bg-amber-400 text-black font-bold py-1.5 px-3 rounded-lg text-xs flex items-center space-x-1 shadow-md shadow-amber-500/20 transition"
-                        >
-                          <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>Pay {cb.name.split(' ')[0]}</span>
-                        </button>
+                        <div className="flex items-center space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const label = selectedDateFilter === 'today' ? 'Today' : selectedDateFilter === 'this_week' ? 'This Week' : selectedDateFilter === 'this_month' ? 'This Month' : 'All Time';
+                              generateCollaboratorsPDF({ data, dateFilterLabel: label, selectedCollaboratorId: cb.id });
+                            }}
+                            className="bg-zinc-800 hover:bg-zinc-700 text-amber-400 border border-amber-500/30 px-2 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center space-x-1 transition shadow-xs"
+                            title={`Download ${cb.name} PDF Statement`}
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>PDF</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setPaymentForm({
+                                date: getTodayString(0),
+                                collaboratorId: cb.id,
+                                amount: cb.unsettled || 500,
+                                referenceNote: `Payout for ${cb.name}`
+                              });
+                              setActiveModal('payment');
+                            }}
+                            className="bg-amber-500 hover:bg-amber-400 text-black font-bold py-1.5 px-3 rounded-lg text-xs flex items-center space-x-1 shadow-md shadow-amber-500/20 transition"
+                          >
+                            <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                            <span>Pay {cb.name.split(' ')[0]}</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -3318,7 +3375,7 @@ export default function App() {
                     type="text"
                     value={collabForm.loadingPoint}
                     onChange={(e) => setCollabForm({ ...collabForm, loadingPoint: e.target.value })}
-                    placeholder="Kucharam-Loading point"
+                    placeholder="Loading point location"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
                   />
                 </div>
@@ -4715,7 +4772,7 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center space-x-2 text-amber-400 font-mono font-bold text-base">
                 <Printer className="w-5 h-5 text-amber-400" />
-                <span>ACCOUNTING PDF REPORT</span>
+                <span>PDF REPORT EXPORT</span>
               </div>
               <button
                 onClick={() => setShowPdfReportModal(false)}
@@ -4725,13 +4782,62 @@ export default function App() {
               </button>
             </div>
 
+            {/* Report Type Selection Tabs */}
+            <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800 font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => setPdfReportType('overall')}
+                className={`flex-1 py-2 rounded-lg font-bold transition text-center ${
+                  pdfReportType === 'overall'
+                    ? 'bg-amber-500 text-black shadow-sm'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Overall Statement
+              </button>
+              <button
+                type="button"
+                onClick={() => setPdfReportType('collab')}
+                className={`flex-1 py-2 rounded-lg font-bold transition text-center ${
+                  pdfReportType === 'collab'
+                    ? 'bg-amber-500 text-black shadow-sm'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Collaborators PDF
+              </button>
+            </div>
+
+            {pdfReportType === 'collab' && (
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 flex items-center justify-between space-x-2 font-mono text-xs">
+                <span className="text-zinc-400 font-bold flex items-center space-x-1.5 whitespace-nowrap">
+                  <Users className="w-4 h-4 text-amber-400" />
+                  <span>Collaborator:</span>
+                </span>
+                <select
+                  value={pdfSelectedCollabId}
+                  onChange={(e) => setPdfSelectedCollabId(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-700 text-amber-400 text-xs font-bold rounded-lg p-2 flex-1 focus:border-amber-400 focus:outline-none"
+                >
+                  <option value="all">All Collaborators ({(data.collaborators || []).length})</option>
+                  {(data.collaborators || []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="space-y-4 text-xs">
               {/* Document Summary Card Preview */}
               <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3 font-mono">
                 <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
                   <div>
                     <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">Document Header</span>
-                    <h3 className="text-sm font-extrabold text-white">TIPPERLOG STATEMENT</h3>
+                    <h3 className="text-sm font-extrabold text-white">
+                      {pdfReportType === 'overall' ? 'TIPPERLOG STATEMENT' : 'COLLABORATOR STATEMENT'}
+                    </h3>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] text-zinc-500 block">Vehicle Reg</span>
@@ -4748,22 +4854,50 @@ export default function App() {
                     <span className="text-zinc-500 block text-[10px]">Time Period:</span>
                     <span className="text-amber-400 font-bold capitalize">{selectedDateFilter.replace('_', ' ')}</span>
                   </div>
-                  <div>
-                    <span className="text-zinc-500 block text-[10px]">Gross Revenue:</span>
-                    <span className="text-emerald-400 font-bold">{formatCurrency(filteredSummary.grossRevenue, sym)}</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block text-[10px]">Total Expenses:</span>
-                    <span className="text-rose-400 font-bold">{formatCurrency(filteredSummary.totalExpenses, sym)}</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block text-[10px]">Net Operating Profit:</span>
-                    <span className="text-white font-black">{formatCurrency(filteredSummary.netProfit, sym)}</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block text-[10px]">Total Trips Recorded:</span>
-                    <span className="text-amber-400 font-bold">{filteredSummary.totalTrips} Trips</span>
-                  </div>
+
+                  {pdfReportType === 'overall' ? (
+                    <>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">Gross Revenue:</span>
+                        <span className="text-emerald-400 font-bold">{formatCurrency(filteredSummary.grossRevenue, sym)}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">Total Expenses:</span>
+                        <span className="text-rose-400 font-bold">{formatCurrency(filteredSummary.totalExpenses, sym)}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">Net Operating Profit:</span>
+                        <span className="text-white font-black">{formatCurrency(filteredSummary.netProfit, sym)}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">Total Trips Recorded:</span>
+                        <span className="text-amber-400 font-bold">{filteredSummary.totalTrips} Trips</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">Target Account:</span>
+                        <span className="text-amber-400 font-bold">
+                          {pdfSelectedCollabId === 'all'
+                            ? 'All Collaborators'
+                            : (data.collaborators || []).find((c) => c.id === pdfSelectedCollabId)?.name || 'Collaborator'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">Collab Revenue:</span>
+                        <span className="text-emerald-400 font-bold">{formatCurrency(filteredSummary.collabRevenue, sym)}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">Payments Received:</span>
+                        <span className="text-emerald-400 font-bold">{formatCurrency(filteredSummary.totalPaymentsReceived, sym)}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 block text-[10px]">Unsettled Due:</span>
+                        <span className="text-amber-400 font-bold">{formatCurrency(filteredSummary.unsettledDue, sym)}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -4773,12 +4907,18 @@ export default function App() {
                   type="button"
                   onClick={() => {
                     const label = selectedDateFilter === 'today' ? 'Today' : selectedDateFilter === 'this_week' ? 'This Week' : selectedDateFilter === 'this_month' ? 'This Month' : 'All Time';
-                    generateAccountingPDF({ data, dateFilterLabel: label });
+                    if (pdfReportType === 'overall') {
+                      generateAccountingPDF({ data, dateFilterLabel: label });
+                    } else {
+                      generateCollaboratorsPDF({ data, dateFilterLabel: label, selectedCollaboratorId: pdfSelectedCollabId });
+                    }
                   }}
                   className="flex-1 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-extrabold py-3 rounded-xl transition flex items-center justify-center space-x-2 shadow-lg shadow-amber-400/20 text-xs font-mono"
                 >
                   <Download className="w-4 h-4 stroke-[2.5]" />
-                  <span>Download PDF Statement</span>
+                  <span>
+                    {pdfReportType === 'overall' ? 'Download Overall PDF Statement' : 'Download Collaborators PDF'}
+                  </span>
                 </button>
 
                 <button
@@ -4794,7 +4934,9 @@ export default function App() {
               </div>
 
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-[11px] text-amber-300/90 leading-relaxed font-mono">
-                ℹ️ The generated PDF contains an official accounting breakdown including vehicle registration details, executive financial summary, collaborator balances, and itemized transaction log entries for tax & bookkeeping purposes.
+                ℹ️ {pdfReportType === 'overall'
+                  ? 'The generated PDF contains an official accounting breakdown including vehicle registration details, executive financial summary, collaborator balances, and itemized transaction log entries for tax & bookkeeping purposes.'
+                  : 'The Collaborator PDF contains detailed collaborator financial summaries, settlement balances, completed collaborator trips, and payout records for tax & bookkeeping.'}
               </div>
             </div>
           </div>

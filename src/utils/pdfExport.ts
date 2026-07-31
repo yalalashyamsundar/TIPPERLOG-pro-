@@ -7,6 +7,12 @@ export interface PDFExportOptions {
   dateFilterLabel: string;
 }
 
+export interface CollabPDFExportOptions {
+  data: AppData;
+  dateFilterLabel: string;
+  selectedCollaboratorId?: string;
+}
+
 function formatPdfCurrency(amount: number, symbol: string): string {
   // Convert '₹' or empty symbol to 'Rs. ' to prevent jsPDF font encoding issues (which render '₹' as superscript '1')
   const cleanSym = (!symbol || symbol === '₹') ? 'Rs. ' : (symbol.endsWith(' ') ? symbol : `${symbol} `);
@@ -20,7 +26,7 @@ function formatPdfRouteDetails(loadingPoint?: string, unloadingPoint?: string, n
     return p.replace(/-?\s*Loading\s*point/gi, '').trim();
   };
 
-  const loading = cleanPoint(loadingPoint) || (cleanPoint(notes) ? '' : 'Kucharam');
+  const loading = cleanPoint(loadingPoint) || cleanPoint(notes) || '';
   const unloading = cleanPoint(unloadingPoint);
 
   if (loading && unloading) {
@@ -218,7 +224,18 @@ export function generateAccountingPDF({ data, dateFilterLabel }: PDFExportOption
   };
 
   // 3.1 Collaborator Trips Table
-  if (data.collabTrips.length > 0) {
+  const userCollabIds = new Set((data.collaborators || []).map((c) => c.id));
+  const userCollabNames = new Set((data.collaborators || []).map((c) => c.name.trim().toLowerCase()));
+
+  const filteredCollabTrips = (data.collabTrips || []).filter((t) => {
+    if ((data.collaborators || []).length === 0) return false;
+    return (
+      (t.collaboratorId && userCollabIds.has(t.collaboratorId)) ||
+      (t.collaboratorName && userCollabNames.has(t.collaboratorName.trim().toLowerCase()))
+    );
+  });
+
+  if (filteredCollabTrips.length > 0) {
     checkPageBreak(30);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
@@ -226,7 +243,7 @@ export function generateAccountingPDF({ data, dateFilterLabel }: PDFExportOption
     doc.text('3.1 Collaborator Trips', 14, yPos);
     yPos += 3;
 
-    const collabSorted = [...data.collabTrips].sort((a, b) => (b.timestamp || new Date(b.date).getTime()) - (a.timestamp || new Date(a.date).getTime()));
+    const collabSorted = [...filteredCollabTrips].sort((a, b) => (b.timestamp || new Date(b.date).getTime()) - (a.timestamp || new Date(a.date).getTime()));
     const collabRows = collabSorted.map((t) => {
       const routeStr = formatPdfRouteDetails(t.loadingPoint, t.unloadingPoint, t.notes);
       return [
@@ -274,7 +291,15 @@ export function generateAccountingPDF({ data, dateFilterLabel }: PDFExportOption
   }
 
   // 3.2 Payouts Received Table
-  if (data.paymentsReceived.length > 0) {
+  const filteredPayments = (data.paymentsReceived || []).filter((p) => {
+    if ((data.collaborators || []).length === 0) return false;
+    return (
+      (p.collaboratorId && userCollabIds.has(p.collaboratorId)) ||
+      (p.collaboratorName && userCollabNames.has(p.collaboratorName.trim().toLowerCase()))
+    );
+  });
+
+  if (filteredPayments.length > 0) {
     checkPageBreak(30);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
@@ -282,7 +307,7 @@ export function generateAccountingPDF({ data, dateFilterLabel }: PDFExportOption
     doc.text('3.2 Payouts Received (Collaborator Settlements)', 14, yPos);
     yPos += 3;
 
-    const payoutSorted = [...data.paymentsReceived].sort((a, b) => (b.timestamp || new Date(b.date).getTime()) - (a.timestamp || new Date(a.date).getTime()));
+    const payoutSorted = [...filteredPayments].sort((a, b) => (b.timestamp || new Date(b.date).getTime()) - (a.timestamp || new Date(a.date).getTime()));
     const payoutRows = payoutSorted.map((pr) => [
       pr.date,
       pr.collaboratorName || 'Collaborator',
@@ -429,5 +454,354 @@ export function generateAccountingPDF({ data, dateFilterLabel }: PDFExportOption
   // Save the generated PDF
   const sanitizedVehicle = vehicle.replace(/[^a-zA-Z0-9]/g, '_');
   doc.save(`TipperLog_Ledger_${sanitizedVehicle}_${Date.now()}.pdf`);
+}
+
+export function generateCollaboratorsPDF({ data, dateFilterLabel, selectedCollaboratorId }: CollabPDFExportOptions) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const sym = data.settings.currencySymbol || '₹';
+  const owner = data.settings.ownerName || 'Vehicle Owner';
+  const vehicle = data.settings.vehicleRegNo || 'TIPPER-01';
+  const nowStr = new Date().toLocaleString();
+
+  // Colors
+  const darkBg: [number, number, number] = [24, 24, 27]; // Zinc 900
+  const textDark: [number, number, number] = [39, 39, 42]; // Zinc 800
+
+  // Determine target collaborators and filter trips
+  const allCollabs = data.collaborators || [];
+  const selectedCollab = (selectedCollaboratorId && selectedCollaboratorId !== 'all')
+    ? allCollabs.find((c) => c.id === selectedCollaboratorId)
+    : null;
+
+  const targetCollabs = selectedCollab ? [selectedCollab] : allCollabs;
+
+  // Build sets of collaborator IDs and names for strict user scoping
+  const userCollabIds = new Set(allCollabs.map((c) => c.id));
+  const userCollabNames = new Set(allCollabs.map((c) => c.name.trim().toLowerCase()));
+
+  const targetCollabTrips = data.collabTrips.filter((t) => {
+    if (selectedCollab) {
+      return (
+        t.collaboratorId === selectedCollab.id ||
+        (t.collaboratorName && selectedCollab.name && t.collaboratorName.trim().toLowerCase() === selectedCollab.name.trim().toLowerCase())
+      );
+    }
+    // Strict scoping: only include trips belonging to current user's registered collaborators
+    if (allCollabs.length === 0) return false;
+    return (
+      (t.collaboratorId && userCollabIds.has(t.collaboratorId)) ||
+      (t.collaboratorName && userCollabNames.has(t.collaboratorName.trim().toLowerCase()))
+    );
+  });
+
+  const targetPayments = data.paymentsReceived.filter((p) => {
+    if (selectedCollab) {
+      return (
+        p.collaboratorId === selectedCollab.id ||
+        (p.collaboratorName && selectedCollab.name && p.collaboratorName.trim().toLowerCase() === selectedCollab.name.trim().toLowerCase())
+      );
+    }
+    if (allCollabs.length === 0) return false;
+    return (
+      (p.collaboratorId && userCollabIds.has(p.collaboratorId)) ||
+      (p.collaboratorName && userCollabNames.has(p.collaboratorName.trim().toLowerCase()))
+    );
+  });
+
+  // Calculate Collaborator Totals
+  const totalCollabRev = targetCollabTrips.reduce((acc, t) => acc + (t.totalAmount || 0), 0);
+  const totalCollabFuel = targetCollabTrips.reduce((acc, t) => acc + (t.fuelExpense || 0), 0);
+  const totalCollabDriver = targetCollabTrips.reduce((acc, t) => acc + (t.driverPay || 0), 0);
+  const totalCollabExpenses = totalCollabFuel + totalCollabDriver;
+  const netProfit = totalCollabRev - totalCollabExpenses;
+
+  const totalPaymentsReceived = targetPayments.reduce((acc, p) => acc + (p.amount || 0), 0);
+  const unsettledDue = Math.max(0, totalCollabRev - totalPaymentsReceived);
+  const totalTripsCount = targetCollabTrips.reduce((acc, t) => acc + (t.tripsCount || 0), 0);
+
+  // 1. Header Banner
+  doc.setFillColor(...darkBg);
+  doc.rect(0, 0, 210, 32, 'F');
+
+  // Title
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.setTextColor(255, 255, 255);
+  doc.text('TIPPERLOG', 14, 15);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(245, 158, 11);
+  const headerSubtitle = selectedCollab
+    ? `COLLABORATOR STATEMENT: ${selectedCollab.name.toUpperCase()}`
+    : 'COLLABORATOR FINANCIAL REPORT & LEDGER';
+  doc.text(headerSubtitle, 14, 22);
+
+  // Vehicle info right-aligned
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(255, 255, 255);
+  doc.text(`Vehicle: ${vehicle}`, 196, 14, { align: 'right' });
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(161, 161, 170);
+  doc.text(`Owner: ${owner}`, 196, 20, { align: 'right' });
+  doc.text(`Period: ${dateFilterLabel} | Generated: ${nowStr}`, 196, 26, { align: 'right' });
+
+  let yPos = 38;
+
+  // 2. Executive Collaborator Financial Summary
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(...textDark);
+  doc.text('1. Collaborator Financial Summary', 14, yPos);
+  yPos += 4;
+
+  autoTable(doc, {
+    startY: yPos,
+    margin: { left: 14, right: 14 },
+    head: [['Metric Description', 'Trips / Count', 'Amount']],
+    body: [
+      ['Total Collaborator Trips Completed', `${totalTripsCount} trips (${targetCollabTrips.length} entries)`, formatPdfCurrency(totalCollabRev, sym)],
+      ['TOTAL GROSS EARNINGS (COLLAB REVENUE)', `${targetCollabTrips.length} trip logs`, formatPdfCurrency(totalCollabRev, sym)],
+      ['Fuel Costs (Collab Trips)', '-', formatPdfCurrency(totalCollabFuel, sym)],
+      ['Driver Pay (Collab Trips)', '-', formatPdfCurrency(totalCollabDriver, sym)],
+      ['TOTAL DIRECT COLLAB OPERATING EXPENSES', '-', formatPdfCurrency(totalCollabExpenses, sym)],
+      ['NET OPERATING PROFIT (Collab Work)', '-', formatPdfCurrency(netProfit, sym)],
+      ['TOTAL PAYMENTS RECEIVED / SETTLED', `${targetPayments.length} receipts`, formatPdfCurrency(totalPaymentsReceived, sym)],
+      ['UNSETTLED BALANCE DUE FROM COLLABORATOR(S)', '-', formatPdfCurrency(unsettledDue, sym)]
+    ],
+    theme: 'grid',
+    styles: { cellPadding: 2, fontSize: 8.5, overflow: 'linebreak' },
+    headStyles: {
+      fillColor: [39, 39, 42],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 9
+    },
+    bodyStyles: {
+      fontSize: 8.5,
+      textColor: [39, 39, 42]
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252]
+    },
+    columnStyles: {
+      0: { cellWidth: 98 },
+      1: { cellWidth: 38, halign: 'center' },
+      2: { cellWidth: 46, halign: 'right', fontStyle: 'bold' }
+    }
+  });
+
+  yPos = (doc as any).lastAutoTable.finalY + 8;
+
+  // 3. Collaborator Balances & Settlement Overview
+  if (targetCollabs.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(...textDark);
+    doc.text('2. Collaborator Balances & Settlement Overview', 14, yPos);
+    yPos += 4;
+
+    const collabRows = targetCollabs.map((c) => {
+      const cTrips = targetCollabTrips.filter(
+        (t) => t.collaboratorId === c.id || (t.collaboratorName && t.collaboratorName.trim().toLowerCase() === c.name.trim().toLowerCase())
+      );
+      const totalEarned = cTrips.reduce((acc, t) => acc + (t.totalAmount || 0), 0);
+      const tripsCount = cTrips.reduce((acc, t) => acc + (t.tripsCount || 0), 0);
+      const cPayments = targetPayments.filter(
+        (p) => p.collaboratorId === c.id || (p.collaboratorName && p.collaboratorName.trim().toLowerCase() === c.name.trim().toLowerCase())
+      );
+      const paid = cPayments.reduce((acc, p) => acc + (p.amount || 0), 0);
+      const due = totalEarned - paid;
+
+      return [
+        c.name,
+        c.phone || '-',
+        `${tripsCount} trips`,
+        formatPdfCurrency(totalEarned, sym),
+        formatPdfCurrency(paid, sym),
+        formatPdfCurrency(due, sym)
+      ];
+    });
+
+    autoTable(doc, {
+      startY: yPos,
+      margin: { left: 14, right: 14 },
+      head: [['Collaborator Name', 'Phone', 'Total Trips', 'Earned', 'Paid Received', 'Unsettled Due']],
+      body: collabRows,
+      theme: 'grid',
+      styles: { cellPadding: 2, fontSize: 8, overflow: 'linebreak' },
+      headStyles: {
+        fillColor: [217, 119, 6], // Amber 600
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8.5
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: [39, 39, 42]
+      },
+      columnStyles: {
+        0: { cellWidth: 38, fontStyle: 'bold' },
+        1: { cellWidth: 26 },
+        2: { cellWidth: 22, halign: 'center' },
+        3: { cellWidth: 32, halign: 'right' },
+        4: { cellWidth: 32, halign: 'right' },
+        5: { cellWidth: 32, halign: 'right', fontStyle: 'bold' }
+      }
+    });
+
+    yPos = (doc as any).lastAutoTable.finalY + 8;
+  }
+
+  // Helper page break checker
+  const checkPageBreak = (neededHeight: number) => {
+    if (yPos + neededHeight > 270) {
+      doc.addPage();
+      yPos = 20;
+    }
+  };
+
+  // Check page break for itemized ledger section header
+  if (yPos > 210) {
+    doc.addPage();
+    yPos = 20;
+  }
+
+  // 4. Detailed Itemized Collaborators Transaction Ledger
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(...textDark);
+  doc.text('3. Itemized Collaborator Ledger', 14, yPos);
+  yPos += 6;
+
+  // 4.1 Collaborator Trips Table
+  if (targetCollabTrips.length > 0) {
+    checkPageBreak(30);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(39, 39, 42);
+    doc.text('3.1 Collaborator Trips', 14, yPos);
+    yPos += 3;
+
+    const collabSorted = [...targetCollabTrips].sort((a, b) => (b.timestamp || new Date(b.date).getTime()) - (a.timestamp || new Date(a.date).getTime()));
+    const collabRows = collabSorted.map((t) => {
+      const routeStr = formatPdfRouteDetails(t.loadingPoint, t.unloadingPoint, t.notes);
+      return [
+        t.date,
+        t.collaboratorName || 'Collaborator',
+        routeStr,
+        `${t.shift}`,
+        `${t.tripsCount}`,
+        formatPdfCurrency(t.totalAmount, sym),
+        formatPdfCurrency((t.fuelExpense || 0) + (t.driverPay || 0), sym),
+        formatPdfCurrency(t.totalAmount - ((t.fuelExpense || 0) + (t.driverPay || 0)), sym)
+      ];
+    });
+
+    autoTable(doc, {
+      startY: yPos,
+      margin: { left: 14, right: 14 },
+      head: [['Date', 'Collaborator', 'Route Details', 'Shift', 'Trips', 'Gross Rev', 'Fuel/Pay', 'Net Profit']],
+      body: collabRows,
+      theme: 'grid',
+      styles: { cellPadding: 1.5, fontSize: 7, overflow: 'linebreak' },
+      headStyles: {
+        fillColor: [39, 39, 42],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 7.5
+      },
+      bodyStyles: {
+        fontSize: 7,
+        textColor: [39, 39, 42]
+      },
+      columnStyles: {
+        0: { cellWidth: 16 },
+        1: { cellWidth: 28, fontStyle: 'bold' },
+        2: { cellWidth: 60, overflow: 'linebreak' },
+        3: { cellWidth: 12, halign: 'center' },
+        4: { cellWidth: 10, halign: 'center' },
+        5: { cellWidth: 18, halign: 'right' },
+        6: { cellWidth: 19, halign: 'right' },
+        7: { cellWidth: 19, halign: 'right', fontStyle: 'bold' }
+      }
+    });
+
+    yPos = (doc as any).lastAutoTable.finalY + 8;
+  }
+
+  // 4.2 Payouts Received Table
+  if (targetPayments.length > 0) {
+    checkPageBreak(30);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(217, 119, 6); // Amber tone for Payouts
+    doc.text('3.2 Payouts Received (Collaborator Settlements)', 14, yPos);
+    yPos += 3;
+
+    const payoutSorted = [...targetPayments].sort((a, b) => (b.timestamp || new Date(b.date).getTime()) - (a.timestamp || new Date(a.date).getTime()));
+    const payoutRows = payoutSorted.map((pr) => [
+      pr.date,
+      pr.collaboratorName || 'Collaborator',
+      pr.referenceNote || 'Collaborator Payout',
+      formatPdfCurrency(pr.amount, sym)
+    ]);
+
+    autoTable(doc, {
+      startY: yPos,
+      margin: { left: 14, right: 14 },
+      head: [['Date', 'Collaborator Name', 'Payment Note / Reference', 'Amount Received']],
+      body: payoutRows,
+      theme: 'grid',
+      styles: { cellPadding: 1.5, fontSize: 7.5, overflow: 'linebreak' },
+      headStyles: {
+        fillColor: [217, 119, 6],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8
+      },
+      bodyStyles: {
+        fontSize: 7.5,
+        textColor: [39, 39, 42]
+      },
+      columnStyles: {
+        0: { cellWidth: 24 },
+        1: { cellWidth: 50, fontStyle: 'bold' },
+        2: { cellWidth: 72 },
+        3: { cellWidth: 36, halign: 'right', fontStyle: 'bold' }
+      }
+    });
+
+    yPos = (doc as any).lastAutoTable.finalY + 8;
+  }
+
+  // Footer page numbers
+  const pageCount = (doc as any).internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(161, 161, 170);
+    doc.text(
+      `TipperLog Collaborators Report | Page ${i} of ${pageCount}`,
+      105,
+      290,
+      { align: 'center' }
+    );
+  }
+
+  // Save the generated PDF
+  const sanitizedVehicle = vehicle.replace(/[^a-zA-Z0-9]/g, '_');
+  const filePrefix = selectedCollab
+    ? `TipperLog_Collab_${selectedCollab.name.replace(/[^a-zA-Z0-9]/g, '_')}`
+    : 'TipperLog_Collaborators_Ledger';
+  doc.save(`${filePrefix}_${sanitizedVehicle}_${Date.now()}.pdf`);
 }
 
