@@ -3,9 +3,15 @@
   "name": "TIPPERLOG - Tipper & Truck Accounting Ledger",
   "icons": [
     {
-      "src": "/apple-touch-icon.png",
+      "src": "/favicon.png",
       "type": "image/png",
       "sizes": "180x180 192x192 512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180",
       "purpose": "any maskable"
     },
     {
@@ -22,7 +28,7 @@
     }
   ],
   "start_url": "/",
-  "background_color": "#FFC107",
+  "background_color": "#09090b",
   "theme_color": "#FFC107",
   "display": "standalone"
 }
