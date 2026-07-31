@@ -14,6 +14,23 @@ function formatPdfCurrency(amount: number, symbol: string): string {
   return `${cleanSym}${formattedNumber}`;
 }
 
+function formatPdfRouteDetails(loadingPoint?: string, unloadingPoint?: string, notes?: string): string {
+  const cleanPoint = (p?: string) => {
+    if (!p) return '';
+    return p.replace(/-?\s*Loading\s*point/gi, '').trim();
+  };
+
+  const loading = cleanPoint(loadingPoint) || (cleanPoint(notes) ? '' : 'Kucharam');
+  const unloading = cleanPoint(unloadingPoint);
+
+  if (loading && unloading) {
+    return `${loading} -- ${unloading}`;
+  }
+  if (loading) return loading;
+  if (unloading) return unloading;
+  return notes?.trim() || '-';
+}
+
 export function generateAccountingPDF({ data, dateFilterLabel }: PDFExportOptions) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -210,41 +227,46 @@ export function generateAccountingPDF({ data, dateFilterLabel }: PDFExportOption
     yPos += 3;
 
     const collabSorted = [...data.collabTrips].sort((a, b) => (b.timestamp || new Date(b.date).getTime()) - (a.timestamp || new Date(a.date).getTime()));
-    const collabRows = collabSorted.map((t) => [
-      t.date,
-      t.collaboratorName || 'Collaborator',
-      `${t.shift} Shift`,
-      `${t.tripsCount}`,
-      formatPdfCurrency(t.totalAmount, sym),
-      formatPdfCurrency((t.fuelExpense || 0) + (t.driverPay || 0), sym),
-      formatPdfCurrency(t.totalAmount - ((t.fuelExpense || 0) + (t.driverPay || 0)), sym)
-    ]);
+    const collabRows = collabSorted.map((t) => {
+      const routeStr = formatPdfRouteDetails(t.loadingPoint, t.unloadingPoint, t.notes);
+      return [
+        t.date,
+        t.collaboratorName || 'Collaborator',
+        routeStr,
+        `${t.shift}`,
+        `${t.tripsCount}`,
+        formatPdfCurrency(t.totalAmount, sym),
+        formatPdfCurrency((t.fuelExpense || 0) + (t.driverPay || 0), sym),
+        formatPdfCurrency(t.totalAmount - ((t.fuelExpense || 0) + (t.driverPay || 0)), sym)
+      ];
+    });
 
     autoTable(doc, {
       startY: yPos,
       margin: { left: 14, right: 14 },
-      head: [['Date', 'Collaborator Name', 'Shift', 'Trips', 'Gross Rev', 'Fuel/Pay Exp', 'Net Impact']],
+      head: [['Date', 'Collaborator', 'Route Details', 'Shift', 'Trips', 'Gross Rev', 'Fuel/Pay', 'Net Profit']],
       body: collabRows,
       theme: 'grid',
-      styles: { cellPadding: 1.5, fontSize: 7.5, overflow: 'linebreak' },
+      styles: { cellPadding: 1.5, fontSize: 7, overflow: 'linebreak' },
       headStyles: {
         fillColor: [39, 39, 42],
         textColor: [255, 255, 255],
         fontStyle: 'bold',
-        fontSize: 8
+        fontSize: 7.5
       },
       bodyStyles: {
-        fontSize: 7.5,
+        fontSize: 7,
         textColor: [39, 39, 42]
       },
       columnStyles: {
-        0: { cellWidth: 22 },
-        1: { cellWidth: 48, fontStyle: 'bold' },
-        2: { cellWidth: 22 },
-        3: { cellWidth: 16, halign: 'center' },
-        4: { cellWidth: 24, halign: 'right' },
-        5: { cellWidth: 24, halign: 'right' },
-        6: { cellWidth: 26, halign: 'right', fontStyle: 'bold' }
+        0: { cellWidth: 16 },
+        1: { cellWidth: 28, fontStyle: 'bold' },
+        2: { cellWidth: 60, overflow: 'linebreak' },
+        3: { cellWidth: 12, halign: 'center' },
+        4: { cellWidth: 10, halign: 'center' },
+        5: { cellWidth: 18, halign: 'right' },
+        6: { cellWidth: 19, halign: 'right' },
+        7: { cellWidth: 19, halign: 'right', fontStyle: 'bold' }
       }
     });
 

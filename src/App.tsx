@@ -9,7 +9,9 @@ import {
   CartesianGrid,
   PieChart as RechartsPieChart,
   Pie,
-  Cell
+  Cell,
+  BarChart,
+  Bar
 } from 'recharts';
 import {
   Truck,
@@ -50,7 +52,11 @@ import {
   Printer,
   Lock,
   LogOut,
-  KeyRound
+  KeyRound,
+  User,
+  Shield,
+  Calculator,
+  Tag
 } from 'lucide-react';
 import { LoginPage } from './components/LoginPage';
 import {
@@ -332,6 +338,213 @@ export default function App() {
   // Search query for logs
   const [searchQuery, setSearchQuery] = useState('');
   const [logsCategory, setLogsCategory] = useState<'all' | 'collab' | 'private' | 'expense'>('all');
+  const [expenseChartType, setExpenseChartType] = useState<'bar' | 'pie'>('bar');
+
+  // Settings & Admin Section States
+  const [settingsTab, setSettingsTab] = useState<'menu' | 'general' | 'pending_rates' | 'admin'>('menu');
+  const [adminSearchQuery, setAdminSearchQuery] = useState('');
+  const [adminCategoryFilter, setAdminCategoryFilter] = useState<'all' | 'collab' | 'private' | 'expense' | 'payment'>('all');
+
+  // Pending Rates Manager States & Helpers
+  const [pendingRatesSelectedDate, setPendingRatesSelectedDate] = useState<string>('');
+  const [pendingRateInputs, setPendingRateInputs] = useState<Record<string, number | string>>({});
+
+  const unpricedCollabTrips = useMemo(() => {
+    return (data.collabTrips || []).filter((t) => Number(t.ratePerTrip || 0) === 0);
+  }, [data.collabTrips]);
+
+  const unpricedPrivateTrips = useMemo(() => {
+    return (data.privateTrips || []).filter((t) => Number(t.ratePerTrip || 0) === 0);
+  }, [data.privateTrips]);
+
+  const totalUnpricedTripsCount = unpricedCollabTrips.length + unpricedPrivateTrips.length;
+
+  // Dates containing unpriced trips sorted descending
+  const pendingRateDates = useMemo(() => {
+    const datesSet = new Set<string>();
+    unpricedCollabTrips.forEach((t) => t.date && datesSet.add(t.date));
+    unpricedPrivateTrips.forEach((t) => t.date && datesSet.add(t.date));
+    return Array.from(datesSet).sort((a, b) => b.localeCompare(a));
+  }, [unpricedCollabTrips, unpricedPrivateTrips]);
+
+  // Default selected date to latest date with pending rates when tab or modal changes
+  useEffect(() => {
+    if (activeModal === 'settings' && settingsTab === 'pending_rates') {
+      if (!pendingRatesSelectedDate || !pendingRateDates.includes(pendingRatesSelectedDate)) {
+        setPendingRatesSelectedDate(pendingRateDates[0] || getTodayString(0));
+      }
+    }
+  }, [activeModal, settingsTab, pendingRateDates, pendingRatesSelectedDate]);
+
+  // Group unpriced trips for the selected date by route & collaborator/client
+  const pendingRouteGroups = useMemo(() => {
+    if (!pendingRatesSelectedDate) return [];
+
+    const groupMap = new Map<
+      string,
+      {
+        key: string;
+        loadingPoint: string;
+        unloadingPoint: string;
+        clientName: string;
+        type: 'collab' | 'private';
+        tripsCount: number;
+        tripIds: string[];
+        recordsCount: number;
+      }
+    >();
+
+    // Collab trips on selected date with rate 0
+    (data.collabTrips || [])
+      .filter((t) => t.date === pendingRatesSelectedDate && Number(t.ratePerTrip || 0) === 0)
+      .forEach((t) => {
+        const loadingPoint = (t.loadingPoint || '').trim() || 'Loading Site';
+        const unloadingPoint = (t.unloadingPoint || '').trim() || 'Unloading Site';
+        const clientName = t.collaboratorName || 'Collaborator';
+        const key = `collab_${clientName}_${loadingPoint}_${unloadingPoint}`;
+
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            key,
+            loadingPoint,
+            unloadingPoint,
+            clientName,
+            type: 'collab',
+            tripsCount: Number(t.tripsCount) || 0,
+            tripIds: [t.id],
+            recordsCount: 1
+          });
+        } else {
+          const existing = groupMap.get(key)!;
+          existing.tripsCount += Number(t.tripsCount) || 0;
+          existing.tripIds.push(t.id);
+          existing.recordsCount += 1;
+        }
+      });
+
+    // Private trips on selected date with rate 0
+    (data.privateTrips || [])
+      .filter((t) => t.date === pendingRatesSelectedDate && Number(t.ratePerTrip || 0) === 0)
+      .forEach((t) => {
+        const loadingPoint = 'Direct Load';
+        const unloadingPoint = 'Client Site';
+        const clientName = (t.customerName || '').trim() || 'Private Client';
+        const key = `private_${clientName}_${loadingPoint}_${unloadingPoint}`;
+
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            key,
+            loadingPoint,
+            unloadingPoint,
+            clientName,
+            type: 'private',
+            tripsCount: Number(t.tripsCount) || 0,
+            tripIds: [t.id],
+            recordsCount: 1
+          });
+        } else {
+          const existing = groupMap.get(key)!;
+          existing.tripsCount += Number(t.tripsCount) || 0;
+          existing.tripIds.push(t.id);
+          existing.recordsCount += 1;
+        }
+      });
+
+    return Array.from(groupMap.values());
+  }, [data.collabTrips, data.privateTrips, pendingRatesSelectedDate]);
+
+  // Initialize rate inputs for new route groups if not already specified
+  useEffect(() => {
+    if (pendingRouteGroups.length > 0) {
+      setPendingRateInputs((prev) => {
+        const updated = { ...prev };
+        pendingRouteGroups.forEach((group) => {
+          if (updated[group.key] === undefined || updated[group.key] === '') {
+            if (group.type === 'collab') {
+              const collabObj = (data.collaborators || []).find((c) => c.name === group.clientName);
+              const defRate = collabObj?.defaultRate ?? data.settings.defaultCollabRate ?? 600;
+              updated[group.key] = defRate;
+            } else {
+              updated[group.key] = 600;
+            }
+          }
+        });
+        return updated;
+      });
+    }
+  }, [pendingRouteGroups, data.collaborators, data.settings.defaultCollabRate]);
+
+  // Batch Save Handler for Pending Rates
+  const handleSavePendingRates = () => {
+    if (pendingRouteGroups.length === 0) {
+      alert('No pending rates to update for this date.');
+      return;
+    }
+
+    const rateMap = new Map<string, number>();
+    pendingRouteGroups.forEach((group) => {
+      const enteredRate = Number(pendingRateInputs[group.key] || 0);
+      if (enteredRate > 0) {
+        group.tripIds.forEach((id) => {
+          rateMap.set(id, enteredRate);
+        });
+      }
+    });
+
+    if (rateMap.size === 0) {
+      alert('Please enter a valid rate (₹) for at least one route group.');
+      return;
+    }
+
+    let updatedRecords = 0;
+    let totalUpdatedRevenue = 0;
+
+    setData((prev) => {
+      const newCollab = prev.collabTrips.map((ct) => {
+        if (rateMap.has(ct.id)) {
+          const newRate = rateMap.get(ct.id)!;
+          const rev = (Number(ct.tripsCount) || 0) * newRate;
+          updatedRecords++;
+          totalUpdatedRevenue += rev;
+          return {
+            ...ct,
+            ratePerTrip: newRate,
+            totalAmount: rev
+          };
+        }
+        return ct;
+      });
+
+      const newPrivate = prev.privateTrips.map((pt) => {
+        if (rateMap.has(pt.id)) {
+          const newRate = rateMap.get(pt.id)!;
+          const rev = (Number(pt.tripsCount) || 0) * newRate;
+          updatedRecords++;
+          totalUpdatedRevenue += rev;
+          return {
+            ...pt,
+            ratePerTrip: newRate,
+            totalAmount: rev
+          };
+        }
+        return pt;
+      });
+
+      return {
+        ...prev,
+        collabTrips: newCollab,
+        privateTrips: newPrivate
+      };
+    });
+
+    setTransactionSuccessModal({
+      type: 'collab',
+      title: 'Trip Rates Batch Updated!',
+      subtitle: `${updatedRecords} Record(s) Priced on ${pendingRatesSelectedDate}`,
+      amount: totalUpdatedRevenue,
+      date: pendingRatesSelectedDate
+    });
+  };
 
   // Supabase Connection & Sync States
   const [supabaseConnected, setSupabaseConnected] = useState<boolean>(true);
@@ -348,6 +561,32 @@ export default function App() {
     type: 'collab' | 'private' | 'expense' | 'payment' | 'collaborator' | 'clear_all' | 'reset_sample';
     title: string;
     description?: string;
+  } | null>(null);
+
+  // Transaction Confirmation Dialog State
+  const [transactionSuccessModal, setTransactionSuccessModal] = useState<{
+    type: 'collab' | 'private' | 'expense' | 'payment';
+    title: string;
+    subtitle: string;
+    amount: number;
+    date: string;
+    savedDate?: string;
+    savedCustomer?: string;
+    savedFuel?: number;
+  } | null>(null);
+
+  // Transaction Detail & Total Summary Popup State
+  const [selectedTransactionDetail, setSelectedTransactionDetail] = useState<{
+    id: string;
+    type: 'collab' | 'private' | 'expense' | 'payment';
+    title: string;
+    subtitle: string;
+    amount: number;
+    date: string;
+    isIncome: boolean;
+    settled?: boolean;
+    collaboratorName?: string;
+    rawObject: any;
   } | null>(null);
 
   // Authentication & Account State
@@ -508,7 +747,7 @@ export default function App() {
     fuelExpense: 0,
     driverPay: 0,
     notes: '',
-    loadingPoint: 'Kucharam-Loading point',
+    loadingPoint: 'Kucharam',
     unloadingPoint: ''
   });
 
@@ -543,8 +782,9 @@ export default function App() {
   const [settingsForm, setSettingsForm] = useState<AppSettings>(data.settings);
 
   // Synchronize settings form when opening settings modal
-  const handleOpenSettings = () => {
+  const handleOpenSettings = (tab: 'menu' | 'general' | 'pending_rates' | 'admin' | any = 'menu') => {
     setSettingsForm(data.settings);
+    setSettingsTab(typeof tab === 'string' ? tab : 'menu');
     setActiveModal('settings');
   };
 
@@ -1046,10 +1286,7 @@ export default function App() {
   };
 
   // Submit Collab Trip (Create or Edit)
-  const handleSaveCollabTrip = (
-    e: React.FormEvent,
-    nextAction: 'close' | 'add_expense' | 'add_another' = 'close'
-  ) => {
+  const handleSaveCollabTrip = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const collabs = data.collaborators || [];
     if (collabs.length === 0) {
@@ -1088,9 +1325,18 @@ export default function App() {
             : t
         )
       }));
+      const savedDate = collabForm.date;
       setEditingId(null);
       setActiveModal(null);
       setIsFabOpen(false);
+
+      setTransactionSuccessModal({
+        type: 'collab',
+        title: 'Collaborator Trip Updated!',
+        subtitle: `${collaboratorName} • ${count} Trip(s) (${collabForm.shift} Shift)`,
+        amount: totalAmount,
+        date: savedDate
+      });
       return;
     }
 
@@ -1108,7 +1354,7 @@ export default function App() {
       driverPay: 0,
       settled: false,
       notes: collabForm.notes,
-      loadingPoint: collabForm.loadingPoint || 'Kucharam-Loading point',
+      loadingPoint: collabForm.loadingPoint || 'Kucharam',
       unloadingPoint: collabForm.unloadingPoint || '',
       timestamp: Date.now()
     };
@@ -1119,38 +1365,30 @@ export default function App() {
     }));
 
     const savedDate = collabForm.date;
-    const savedFuel = Number(collabForm.fuelExpense) || 0;
 
     setCollabForm((prev) => ({
       ...prev,
       notes: '',
       fuelExpense: 0,
       driverPay: 0,
-      loadingPoint: 'Kucharam-Loading point',
+      loadingPoint: 'Kucharam',
       unloadingPoint: ''
     }));
 
-    if (nextAction === 'add_expense') {
-      setExpenseForm({
-        date: savedDate,
-        category: 'Fuel',
-        amount: 0,
-        notes: `Daily operational expense (${savedDate})`
-      });
-      setActiveModal('expense');
-    } else if (nextAction === 'add_another') {
-      setActiveModal('collab');
-    } else {
-      setActiveModal(null);
-      setIsFabOpen(false);
-    }
+    setActiveModal(null);
+    setIsFabOpen(false);
+
+    setTransactionSuccessModal({
+      type: 'collab',
+      title: 'Collaborator Trip Logged!',
+      subtitle: `${collaboratorName} • ${count} Trip(s) (${collabForm.shift} Shift)`,
+      amount: totalAmount,
+      date: savedDate
+    });
   };
 
   // Submit Private Trip (Create or Edit)
-  const handleSavePrivateTrip = (
-    e: React.FormEvent,
-    nextAction: 'close' | 'add_expense' | 'add_another' = 'close'
-  ) => {
+  const handleSavePrivateTrip = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const count = Number(privateForm.tripsCount) || 1;
     const rate = Number(privateForm.ratePerTrip) || 0;
@@ -1175,9 +1413,18 @@ export default function App() {
             : p
         )
       }));
+      const savedDate = privateForm.date;
       setEditingId(null);
       setActiveModal(null);
       setIsFabOpen(false);
+
+      setTransactionSuccessModal({
+        type: 'private',
+        title: 'Private Trip Updated!',
+        subtitle: `${privateForm.customerName.trim() || 'Private Client'} • ${count} Trip(s)`,
+        amount: totalAmount,
+        date: savedDate
+      });
       return;
     }
 
@@ -1201,7 +1448,7 @@ export default function App() {
     }));
 
     const savedDate = privateForm.date;
-    const savedCustomer = privateForm.customerName;
+    const savedCustomer = privateForm.customerName.trim() || 'Private Client';
     const savedFuel = Number(privateForm.extraFuelCost) || 0;
 
     setPrivateForm((prev) => ({
@@ -1211,28 +1458,26 @@ export default function App() {
       extraFuelCost: 0
     }));
 
-    if (nextAction === 'add_expense') {
-      setExpenseForm({
-        date: savedDate,
-        category: 'Fuel',
-        amount: savedFuel,
-        notes: `Fuel expense for ${savedCustomer || 'Private Trip'}`
-      });
-      setActiveModal('expense');
-    } else if (nextAction === 'add_another') {
-      setActiveModal('private');
-    } else {
-      setActiveModal(null);
-      setIsFabOpen(false);
-    }
+    setActiveModal(null);
+    setIsFabOpen(false);
+
+    setTransactionSuccessModal({
+      type: 'private',
+      title: 'Private Trip Logged!',
+      subtitle: `${savedCustomer} • ${count} Trip(s)`,
+      amount: totalAmount,
+      date: savedDate,
+      savedDate,
+      savedCustomer,
+      savedFuel
+    });
   };
 
   // Submit Expense (Create or Edit)
-  const handleSaveExpense = (
-    e: React.FormEvent,
-    nextAction: 'close' | 'add_another' | 'add_trip' = 'close'
-  ) => {
+  const handleSaveExpense = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    const amountVal = Number(expenseForm.amount) || 0;
+
     if (editingId) {
       setData((prev) => ({
         ...prev,
@@ -1242,15 +1487,24 @@ export default function App() {
                 ...ex,
                 date: expenseForm.date,
                 category: expenseForm.category,
-                amount: Number(expenseForm.amount) || 0,
+                amount: amountVal,
                 notes: expenseForm.notes
               }
             : ex
         )
       }));
+      const savedDate = expenseForm.date;
       setEditingId(null);
       setActiveModal(null);
       setIsFabOpen(false);
+
+      setTransactionSuccessModal({
+        type: 'expense',
+        title: 'Expense Updated!',
+        subtitle: `${expenseForm.category} Expense`,
+        amount: amountVal,
+        date: savedDate
+      });
       return;
     }
 
@@ -1259,7 +1513,7 @@ export default function App() {
       userId: currentUserId,
       date: expenseForm.date,
       category: expenseForm.category,
-      amount: Number(expenseForm.amount) || 0,
+      amount: amountVal,
       notes: expenseForm.notes,
       timestamp: Date.now()
     };
@@ -1269,25 +1523,30 @@ export default function App() {
       expenses: [newExpense, ...prev.expenses]
     }));
 
+    const savedDate = expenseForm.date;
+    const savedCategory = expenseForm.category;
+
     setExpenseForm((prev) => ({
       ...prev,
       amount: 0,
       notes: ''
     }));
 
-    if (nextAction === 'add_trip') {
-      setActiveModal('collab');
-    } else if (nextAction === 'add_another') {
-      setActiveModal('expense');
-    } else {
-      setActiveModal(null);
-      setIsFabOpen(false);
-    }
+    setActiveModal(null);
+    setIsFabOpen(false);
+
+    setTransactionSuccessModal({
+      type: 'expense',
+      title: 'Expense Logged!',
+      subtitle: `${savedCategory} Expense`,
+      amount: amountVal,
+      date: savedDate
+    });
   };
 
   // Submit Payment Received (Create or Edit)
-  const handleSavePayment = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSavePayment = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const collabs = data.collaborators || [];
     if (collabs.length === 0) {
       alert('Please add a collaborator first before recording a payment.');
@@ -1297,6 +1556,7 @@ export default function App() {
     const collabObj = collabs.find((c) => c.id === paymentForm.collaboratorId) || collabs[0];
     const collaboratorId = collabObj?.id || '';
     const collaboratorName = collabObj?.name || 'Collaborator';
+    const amountVal = Number(paymentForm.amount) || 0;
 
     if (editingId) {
       setData((prev) => ({
@@ -1308,15 +1568,24 @@ export default function App() {
                 date: paymentForm.date,
                 collaboratorId,
                 collaboratorName,
-                amount: Number(paymentForm.amount) || 0,
+                amount: amountVal,
                 referenceNote: paymentForm.referenceNote.trim() || 'Collaborator Payout'
               }
             : pr
         )
       }));
+      const savedDate = paymentForm.date;
       setEditingId(null);
       setActiveModal(null);
       setIsFabOpen(false);
+
+      setTransactionSuccessModal({
+        type: 'payment',
+        title: 'Payout Updated!',
+        subtitle: `Payout to ${collaboratorName}`,
+        amount: amountVal,
+        date: savedDate
+      });
       return;
     }
 
@@ -1326,7 +1595,7 @@ export default function App() {
       date: paymentForm.date,
       collaboratorId,
       collaboratorName,
-      amount: Number(paymentForm.amount) || 0,
+      amount: amountVal,
       referenceNote: paymentForm.referenceNote.trim() || 'Collaborator Payout',
       timestamp: Date.now()
     };
@@ -1336,8 +1605,24 @@ export default function App() {
       paymentsReceived: [newPayment, ...prev.paymentsReceived]
     }));
 
+    const savedDate = paymentForm.date;
+
+    setPaymentForm((prev) => ({
+      ...prev,
+      amount: 0,
+      referenceNote: ''
+    }));
+
     setActiveModal(null);
     setIsFabOpen(false);
+
+    setTransactionSuccessModal({
+      type: 'payment',
+      title: 'Payout Logged!',
+      subtitle: `Payout to ${collaboratorName}`,
+      amount: amountVal,
+      date: savedDate
+    });
   };
 
   // Open Edit Collaborator Modal
@@ -1652,9 +1937,9 @@ export default function App() {
               </button>
 
               <button
-                onClick={handleOpenSettings}
+                onClick={() => handleOpenSettings('menu')}
                 className="p-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl border border-zinc-800 transition"
-                title="App Settings"
+                title="App Settings Menu"
               >
                 <Settings className="w-4 h-4" />
               </button>
@@ -1726,9 +2011,9 @@ export default function App() {
               </button>
 
               <button
-                onClick={handleOpenSettings}
+                onClick={() => handleOpenSettings('menu')}
                 className="p-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl border border-zinc-800 transition"
-                title="App Settings"
+                title="App Settings Menu"
               >
                 <Settings className="w-4 h-4" />
               </button>
@@ -1908,8 +2193,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* CHARTS SECTION (2 Columns on Desktop) */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* CHARTS SECTION */}
+            <div className="w-full">
               {/* FINANCIAL PERFORMANCE TREND GRAPH */}
               <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 shadow-xs space-y-3">
                 <div className="flex items-center justify-between">
@@ -1998,88 +2283,6 @@ export default function App() {
                   </ResponsiveContainer>
                 </div>
               </div>
-
-              {/* EXPENSE BREAKDOWN PIE CHART WIDGET */}
-              <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 shadow-xs space-y-3">
-                <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
-                  <div className="flex items-center space-x-2">
-                    <PieChart className="w-4 h-4 text-rose-400" />
-                    <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">
-                      Expense Breakdown
-                    </h3>
-                  </div>
-                  <span className="text-[10px] text-zinc-400 font-mono">
-                    Total: <strong className="text-rose-400">{formatCurrency(filteredSummary.totalExpenses, sym)}</strong>
-                  </span>
-                </div>
-
-                {expensePieData.length > 0 ? (
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-                    {/* Donut Pie Chart Container */}
-                    <div className="h-44 w-full sm:w-1/2 relative flex items-center justify-center">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <RechartsPieChart>
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: '#09090b',
-                              borderColor: '#27272a',
-                              borderRadius: '0.75rem',
-                              fontSize: '11px',
-                              fontFamily: 'monospace',
-                              color: '#fff',
-                              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'
-                            }}
-                            formatter={(value: any, name: any) => [
-                              `${formatCurrency(Number(value) || 0, sym)} (${filteredSummary.totalExpenses > 0 ? Math.round((Number(value) / filteredSummary.totalExpenses) * 100) : 0}%)`,
-                              name
-                            ]}
-                          />
-                          <Pie
-                            data={expensePieData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={42}
-                            outerRadius={65}
-                            paddingAngle={3}
-                            dataKey="value"
-                          >
-                            {expensePieData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} stroke="#18181b" strokeWidth={2} />
-                            ))}
-                          </Pie>
-                        </RechartsPieChart>
-                      </ResponsiveContainer>
-                      {/* Donut Center Label */}
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
-                        <span className="text-[9px] text-zinc-500 font-mono uppercase">Total Spent</span>
-                        <span className="text-xs font-bold font-mono text-white">
-                          {formatCurrency(filteredSummary.totalExpenses, sym)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Legend & Category breakdown list */}
-                    <div className="w-full sm:w-1/2 space-y-1.5">
-                      {expensePieData.map((item) => (
-                        <div key={item.name} className="flex items-center justify-between text-xs font-mono bg-zinc-950/60 px-2.5 py-1.5 rounded-xl border border-zinc-800/80">
-                          <div className="flex items-center space-x-2">
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.color }} />
-                            <span className="text-zinc-200 font-medium">{item.name}</span>
-                          </div>
-                          <div className="text-right flex items-center space-x-2">
-                            <span className="font-bold text-white">{formatCurrency(item.value, sym)}</span>
-                            <span className="text-[10px] text-zinc-400 bg-zinc-800/80 px-1.5 py-0.5 rounded border border-zinc-700/50">{item.percentage}%</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="py-6 text-center text-xs font-mono text-zinc-500 bg-zinc-950/40 rounded-xl border border-zinc-800/50">
-                    No expense records logged for this selected period.
-                  </div>
-                )}
-              </div>
             </div>
 
             {/* RECENT ACTIVITY STREAM */}
@@ -2099,19 +2302,17 @@ export default function App() {
               </div>
 
               {/* Grid layout for Activity Cards on Tablet & Laptop */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-2">
                 {combinedActivityStream.slice(0, 6).map((item) => (
                   <div
                     key={item.id}
-                    onClick={(e) => {
-                      if ((e.target as HTMLElement).closest('button')) return;
-                      handleEditItem(item);
-                    }}
-                    className="bg-zinc-900 border border-zinc-800 hover:border-amber-500/40 rounded-xl p-3.5 flex items-center justify-between transition cursor-pointer group"
+                    onClick={() => setSelectedTransactionDetail(item)}
+                    className="bg-zinc-900 border border-zinc-800/90 hover:border-amber-500/40 rounded-xl px-3.5 py-2.5 flex items-center justify-between transition cursor-pointer group hover:bg-zinc-900/90"
                   >
-                    <div className="flex items-center space-x-3">
+                    {/* Left Section: Icon + Title + Settled Badge + Date */}
+                    <div className="flex items-center space-x-3 min-w-0 flex-1">
                       <div
-                        className={`p-2 rounded-lg flex items-center justify-center ${
+                        className={`p-2 rounded-lg shrink-0 ${
                           item.type === 'collab'
                             ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
                             : item.type === 'private'
@@ -2127,57 +2328,40 @@ export default function App() {
                         {item.type === 'payment' && <DollarSign className="w-4 h-4" />}
                       </div>
 
-                      <div>
-                        <div className="text-xs font-bold text-zinc-100 flex items-center space-x-1.5">
-                          <span>{item.title}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-2 truncate">
+                          <span className="text-xs font-bold text-white truncate">{item.title}</span>
                           {item.type === 'collab' && (
                             <span
-                              className={`text-[9px] px-1.5 py-0.2 rounded font-mono ${
+                              className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-extrabold shrink-0 ${
                                 item.settled
                                   ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
                                   : 'bg-amber-950 text-amber-400 border border-amber-800'
                               }`}
                             >
-                              {item.settled ? 'SETTLED' : 'UNSETTLED'}
+                              {item.settled ? '✓ SETTLED' : '⚠ UNSETTLED'}
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-zinc-400 line-clamp-1">{item.subtitle}</p>
-                        <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                          {formatDateReadable(item.date)}
-                        </p>
+                        <div className="flex items-center space-x-2 text-[10px] text-zinc-400 font-mono truncate">
+                          <span className="truncate">{item.subtitle}</span>
+                          <span>•</span>
+                          <span className="shrink-0">{formatDateReadable(item.date)}</span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="text-right">
+                    {/* Right Section: Amount + Details Arrow */}
+                    <div className="flex items-center space-x-2.5 shrink-0 ml-3">
                       <div
-                        className={`text-sm font-bold font-mono ${
+                        className={`text-xs sm:text-sm font-bold font-mono ${
                           item.isIncome ? 'text-emerald-400' : 'text-rose-400'
                         }`}
                       >
                         {item.isIncome ? '+' : '-'}{formatCurrency(item.amount, sym)}
                       </div>
-                      <div className="flex items-center justify-end space-x-1 mt-0.5">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEditItem(item);
-                          }}
-                          className="text-zinc-500 hover:text-amber-400 p-1.5 hover:bg-amber-500/10 rounded-lg transition"
-                          title="Edit log entry"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            requestDelete(item.id, item.type, item.title);
-                          }}
-                          className="text-zinc-500 hover:text-rose-400 p-1.5 hover:bg-rose-500/10 rounded-lg transition"
-                          title="Delete log"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      <div className="p-1 rounded-lg bg-zinc-800/80 group-hover:bg-amber-500/20 text-zinc-400 group-hover:text-amber-400 transition">
+                        <ChevronRight className="w-4 h-4" />
                       </div>
                     </div>
                   </div>
@@ -2205,9 +2389,19 @@ export default function App() {
                   <FileText className="w-5 h-5" />
                   <span>TRIP & EXPENSE LOGS</span>
                 </h2>
-                <span className="text-xs text-zinc-400 font-mono">
-                  {filteredLogsList.length} Entries
-                </span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handleOpenSettings('admin')}
+                    className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-mono font-bold transition flex items-center space-x-1"
+                    title="Open Admin Section in Settings to Edit My Trips"
+                  >
+                    <Lock className="w-3 h-3" />
+                    <span>Admin Edit Mode</span>
+                  </button>
+                  <span className="text-xs text-zinc-400 font-mono">
+                    {filteredLogsList.length} Entries
+                  </span>
+                </div>
               </div>
 
               {/* Search & Category Tabs Controls Bar */}
@@ -2256,106 +2450,67 @@ export default function App() {
               </div>
             </div>
 
-            {/* List of Filtered Logs (Grid on Tablet / Desktop) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {/* List of Filtered Logs */}
+            <div className="space-y-2">
               {filteredLogsList.map((item) => (
                 <div
                   key={item.id}
-                  onClick={(e) => {
-                    if ((e.target as HTMLElement).closest('button')) return;
-                    handleEditItem(item);
-                  }}
-                  className="bg-zinc-900 border border-zinc-800 hover:border-amber-500/40 rounded-xl p-3.5 space-y-2 transition shadow-md cursor-pointer group"
+                  onClick={() => setSelectedTransactionDetail(item)}
+                  className="bg-zinc-900 border border-zinc-800/90 hover:border-amber-500/40 rounded-xl px-3.5 py-2.5 flex items-center justify-between transition cursor-pointer group hover:bg-zinc-900/90"
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-2.5">
-                      <div
-                        className={`p-2 rounded-lg ${
-                          item.type === 'collab'
-                            ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
-                            : item.type === 'private'
-                            ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                            : item.type === 'expense'
-                            ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        }`}
-                      >
-                        {item.type === 'collab' && <Truck className="w-4 h-4" />}
-                        {item.type === 'private' && <Briefcase className="w-4 h-4" />}
-                        {item.type === 'expense' && <Fuel className="w-4 h-4" />}
-                        {item.type === 'payment' && <DollarSign className="w-4 h-4" />}
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-bold text-white flex items-center space-x-2">
-                          <span>{item.title}</span>
-                          {item.type === 'collab' && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleCollabSettled(item.id);
-                              }}
-                              className={`text-[10px] font-mono px-2 py-0.5 rounded cursor-pointer transition ${
-                                item.settled
-                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                                  : 'bg-amber-950 text-amber-400 border border-amber-800 hover:bg-amber-900'
-                              }`}
-                            >
-                              {item.settled ? '✓ SETTLED' : '⚠ UNSETTLED'}
-                            </button>
-                          )}
-                        </h4>
-                        <p className="text-xs text-zinc-400 font-mono mt-0.5">{item.subtitle}</p>
-                      </div>
+                  {/* Left Section: Icon + Title + Settled Badge + Subtitle/Date */}
+                  <div className="flex items-center space-x-3 min-w-0 flex-1">
+                    <div
+                      className={`p-2 rounded-lg shrink-0 ${
+                        item.type === 'collab'
+                          ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+                          : item.type === 'private'
+                          ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                          : item.type === 'expense'
+                          ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                          : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      }`}
+                    >
+                      {item.type === 'collab' && <Truck className="w-4 h-4" />}
+                      {item.type === 'private' && <Briefcase className="w-4 h-4" />}
+                      {item.type === 'expense' && <Fuel className="w-4 h-4" />}
+                      {item.type === 'payment' && <DollarSign className="w-4 h-4" />}
                     </div>
 
-                    <div className="text-right">
-                      <div
-                        className={`text-base font-bold font-mono ${
-                          item.isIncome ? 'text-emerald-400' : 'text-rose-400'
-                        }`}
-                      >
-                        {item.isIncome ? '+' : '-'}{formatCurrency(item.amount, sym)}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center space-x-2 truncate">
+                        <span className="text-xs font-bold text-white truncate">{item.title}</span>
+                        {item.type === 'collab' && (
+                          <span
+                            className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-extrabold shrink-0 ${
+                              item.settled
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : 'bg-amber-950 text-amber-400 border border-amber-800'
+                            }`}
+                          >
+                            {item.settled ? '✓ SETTLED' : '⚠ UNSETTLED'}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                        {formatDateReadable(item.date)}
-                      </p>
+                      <div className="flex items-center space-x-2 text-[10px] text-zinc-400 font-mono truncate">
+                        <span className="truncate">{item.subtitle}</span>
+                        <span>•</span>
+                        <span className="shrink-0">{formatDateReadable(item.date)}</span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Extra Metadata breakdown for Collab or Private trips */}
-                  {item.type === 'collab' && (
-                    <div className="bg-zinc-950/80 rounded-lg p-2 text-[11px] font-mono text-zinc-400 flex items-center justify-between border border-zinc-800/80">
-                      <span>Fuel Cost: <strong className="text-rose-400">{formatCurrency(item.rawObject.fuelExpense, sym)}</strong></span>
-                      <span>Driver Pay: <strong className="text-amber-400">{formatCurrency(item.rawObject.driverPay, sym)}</strong></span>
-                      <span>Net: <strong className="text-emerald-400">{formatCurrency(item.amount - item.rawObject.fuelExpense - item.rawObject.driverPay, sym)}</strong></span>
+                  {/* Right Section: Amount + Details Chevron */}
+                  <div className="flex items-center space-x-2.5 shrink-0 ml-3">
+                    <div
+                      className={`text-xs sm:text-sm font-bold font-mono ${
+                        item.isIncome ? 'text-emerald-400' : 'text-rose-400'
+                      }`}
+                    >
+                      {item.isIncome ? '+' : '-'}{formatCurrency(item.amount, sym)}
                     </div>
-                  )}
-
-                  {/* Action Bar */}
-                  <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-xs text-zinc-500">
-                    <span className="text-[10px] font-mono">ID: {item.id}</span>
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditItem(item);
-                        }}
-                        className="text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10 px-2 py-1 rounded-lg flex items-center space-x-1 text-xs transition"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                        <span>Edit</span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          requestDelete(item.id, item.type, item.title);
-                        }}
-                        className="text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 px-2 py-1 rounded-lg flex items-center space-x-1 text-xs transition"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Delete</span>
-                      </button>
+                    <div className="p-1 rounded-lg bg-zinc-800/80 group-hover:bg-amber-500/20 text-zinc-400 group-hover:text-amber-400 transition">
+                      <ChevronRight className="w-4 h-4" />
                     </div>
                   </div>
                 </div>
@@ -3214,21 +3369,11 @@ export default function App() {
               <div className="space-y-2 pt-1 border-t border-zinc-800">
                 <button
                   type="submit"
-                  className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-yellow-500/20"
+                  className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-yellow-500/20 flex items-center justify-center space-x-2 cursor-pointer"
                 >
-                  {editingId ? 'Update Trip Log' : 'Save Collab Trip Log'}
+                  <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                  <span>{editingId ? 'Update Trip Log' : 'Save Collab Trip Log'}</span>
                 </button>
-
-                {!editingId && (
-                  <button
-                    type="button"
-                    onClick={(e) => handleSaveCollabTrip(e, 'add_another')}
-                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-yellow-500/30 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-yellow-400" />
-                    <span>+ Save & Log Another</span>
-                  </button>
-                )}
               </div>
             </form>
           </div>
@@ -3381,31 +3526,11 @@ export default function App() {
               <div className="space-y-2 pt-1 border-t border-zinc-800">
                 <button
                   type="submit"
-                  className="w-full bg-cyan-400 hover:bg-cyan-300 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-cyan-500/20"
+                  className="w-full bg-cyan-400 hover:bg-cyan-300 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-cyan-500/20 flex items-center justify-center space-x-2 cursor-pointer"
                 >
-                  {editingId ? 'Update Private Trip Log' : 'Save Private Trip Log'}
+                  <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                  <span>{editingId ? 'Update Private Trip Log' : 'Save Private Trip Log'}</span>
                 </button>
-
-                {!editingId && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => handleSavePrivateTrip(e, 'add_expense')}
-                      className="w-full bg-zinc-800 hover:bg-zinc-700 text-rose-400 border border-rose-500/30 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-1.5"
-                    >
-                      <Fuel className="w-3.5 h-3.5 text-rose-400" />
-                      <span>+ Save & Add Expense</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => handleSavePrivateTrip(e, 'add_another')}
-                      className="w-full bg-zinc-800 hover:bg-zinc-700 text-cyan-400 border border-cyan-500/30 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-1.5"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>+ Save & Log Another</span>
-                    </button>
-                  </div>
-                )}
               </div>
             </form>
           </div>
@@ -3643,77 +3768,753 @@ export default function App() {
       )}
 
       {/* ========================================== */}
-      {/* MODAL 5: SETTINGS CONFIG                   */}
+      {/* MODAL 5: SETTINGS & MENU (GROUPED LIST)   */}
       {/* ========================================== */}
       {activeModal === 'settings' && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-zinc-900 border border-yellow-500/40 rounded-2xl w-full max-w-md p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div className="flex items-center space-x-2 text-yellow-400 font-mono font-bold text-base">
-                <Settings className="w-5 h-5" />
-                <span>TIPPERLOG SETTINGS</span>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
+          <div className="bg-zinc-900 border border-amber-500/30 rounded-2xl sm:rounded-3xl w-full max-w-2xl p-4 sm:p-6 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
+              <div className="flex items-center space-x-2 text-amber-400 font-mono font-bold text-sm sm:text-base">
+                <Settings className="w-5 h-5 text-amber-400" />
+                <span>TIPPERLOG MENU & SETTINGS</span>
               </div>
               <button
                 onClick={() => setActiveModal(null)}
-                className="text-zinc-400 hover:text-white p-1"
+                className="text-zinc-400 hover:text-white p-1.5 rounded-xl hover:bg-zinc-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveSettings} className="space-y-4 text-xs font-mono">
-              <div>
-                <label className="block text-zinc-400 mb-1">Default Collab Rate per Trip</label>
-                <input
-                  type="number"
-                  required
-                  value={settingsForm.defaultCollabRate}
-                  onChange={(e) => setSettingsForm({ ...settingsForm, defaultCollabRate: Number(e.target.value) || 0 })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 mb-1">Vehicle Registration No.</label>
-                <input
-                  type="text"
-                  value={settingsForm.vehicleRegNo}
-                  onChange={(e) => setSettingsForm({ ...settingsForm, vehicleRegNo: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 mb-1">Owner / Fleet Name</label>
-                <input
-                  type="text"
-                  value={settingsForm.ownerName}
-                  onChange={(e) => setSettingsForm({ ...settingsForm, ownerName: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
-                />
-              </div>
-
+            {/* Quick Segmented Sub-Tab Switcher Bar */}
+            <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800/80 text-xs font-mono">
               <button
-                type="submit"
-                className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-yellow-500/20"
+                type="button"
+                onClick={() => setSettingsTab('menu')}
+                className={`flex-1 py-1.5 rounded-lg font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  settingsTab === 'menu'
+                    ? 'bg-amber-400 text-black shadow-xs font-extrabold'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
               >
-                Save Settings
+                <Layers className="w-3.5 h-3.5" />
+                <span>Menu</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setSettingsTab('general')}
+                className={`flex-1 py-1.5 rounded-lg font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  settingsTab === 'general'
+                    ? 'bg-amber-400 text-black shadow-xs font-extrabold'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Profile</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsTab('pending_rates')}
+                className={`flex-1 py-1.5 rounded-lg font-bold transition flex items-center justify-center gap-1.5 cursor-pointer relative ${
+                  settingsTab === 'pending_rates'
+                    ? 'bg-amber-400 text-black shadow-xs font-extrabold'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Calculator className="w-3.5 h-3.5" />
+                <span>Rates</span>
+                {totalUnpricedTripsCount > 0 && (
+                  <span
+                    className={`ml-1 px-1.5 py-0.2 text-[9px] font-extrabold rounded-full ${
+                      settingsTab === 'pending_rates'
+                        ? 'bg-black text-amber-400'
+                        : 'bg-amber-500/30 text-amber-300'
+                    }`}
+                  >
+                    {totalUnpricedTripsCount}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsTab('admin')}
+                className={`flex-1 py-1.5 rounded-lg font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  settingsTab === 'admin'
+                    ? 'bg-amber-400 text-black shadow-xs font-extrabold'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Admin</span>
+              </button>
+            </div>
 
-              <div className="pt-3 border-t border-zinc-800">
+            {/* ================================================== */}
+            {/* VIEW 1: SLEEK DARK-MODE GROUPED LIST LAYOUT (MENU) */}
+            {/* ================================================== */}
+            {settingsTab === 'menu' && (
+              <div className="space-y-4 font-mono text-xs animate-in fade-in duration-200">
+                {/* Profile Hero Header Card (iOS/Instagram Profile Style) */}
+                <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-zinc-800/90 rounded-2xl p-4 flex items-center justify-between shadow-md">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-amber-400 text-zinc-950 font-black text-base rounded-2xl flex items-center justify-center shadow-md shadow-amber-500/10 ring-2 ring-amber-400/20 shrink-0">
+                      {(data.settings.ownerName || 'T').charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <h3 className="font-extrabold text-white text-sm tracking-tight">
+                          {data.settings.ownerName || 'Fleet Owner'}
+                        </h3>
+                        <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Active
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-zinc-400 mt-0.5 flex items-center space-x-2">
+                        <span>{data.settings.vehicleRegNo || 'No vehicle reg'}</span>
+                        <span>•</span>
+                        <span className="text-amber-400 font-bold">Default {sym}{data.settings.defaultCollabRate || 600}/trip</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsTab('general')}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-amber-400 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-zinc-700/80 transition flex items-center space-x-1 cursor-pointer shrink-0"
+                  >
+                    <Edit2 className="w-3 h-3" />
+                    <span className="hidden sm:inline">Edit Profile</span>
+                  </button>
+                </div>
+
+                {/* GROUP 1: ACCOUNT & FLEET PREFERENCES */}
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-1 flex items-center space-x-1">
+                    <User className="w-3 h-3 text-amber-400" />
+                    <span>ACCOUNT & FLEET PREFERENCES</span>
+                  </div>
+                  <div className="bg-zinc-950 rounded-2xl border border-zinc-800/80 divide-y divide-zinc-800/60 overflow-hidden shadow-xs">
+                    {/* Fleet Owner Profile */}
+                    <button
+                      type="button"
+                      onClick={() => setSettingsTab('general')}
+                      className="w-full p-3.5 transition flex items-center justify-between text-left hover:bg-zinc-900/80 cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20 group-hover:scale-105 transition-transform">
+                          <User className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-white group-hover:text-amber-400 transition-colors">
+                            Profile & Vehicle Details
+                          </div>
+                          <div className="text-[10px] text-zinc-400 mt-0.5">
+                            Owner Name, Vehicle Reg No. & Default Collab Rates
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* GROUP 2: TRIP LOGS & RATE MANAGEMENT */}
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-1 flex items-center space-x-1">
+                    <Calculator className="w-3 h-3 text-amber-400" />
+                    <span>TRIP LOGS & RATE MANAGEMENT</span>
+                  </div>
+                  <div className="bg-zinc-950 rounded-2xl border border-zinc-800/80 divide-y divide-zinc-800/60 overflow-hidden shadow-xs">
+                    {/* Pending Trip Rates */}
+                    <button
+                      type="button"
+                      onClick={() => setSettingsTab('pending_rates')}
+                      className="w-full p-3.5 transition flex items-center justify-between text-left hover:bg-zinc-900/80 cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20 group-hover:scale-105 transition-transform">
+                          <Calculator className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-bold text-white group-hover:text-amber-400 transition-colors">
+                              Pending Trip Rates Manager
+                            </span>
+                            {totalUnpricedTripsCount > 0 && (
+                              <span className="px-2 py-0.5 text-[9px] font-extrabold rounded-full bg-amber-400 text-black shadow-xs animate-pulse">
+                                {totalUnpricedTripsCount} Pending
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-zinc-400 mt-0.5">
+                            Batch assign rates to ₹0 unpriced daily trips
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+                    </button>
+
+                    {/* Admin Trip Editor */}
+                    <button
+                      type="button"
+                      onClick={() => setSettingsTab('admin')}
+                      className="w-full p-3.5 transition flex items-center justify-between text-left hover:bg-zinc-900/80 cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20 group-hover:scale-105 transition-transform">
+                          <Lock className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-bold text-white group-hover:text-amber-400 transition-colors">
+                              Admin Trip Management Panel
+                            </span>
+                            <span className="px-2 py-0.5 text-[9px] font-bold rounded-md bg-zinc-900 text-zinc-400 border border-zinc-800">
+                              {(data.collabTrips || []).length + (data.privateTrips || []).length} Logged
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-zinc-400 mt-0.5">
+                            Search, filter, edit or remove recorded logs & payouts
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* GROUP 3: DATA BACKUP & PRINTABLE REPORTS */}
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-1 flex items-center space-x-1">
+                    <Database className="w-3 h-3 text-amber-400" />
+                    <span>DATA BACKUP & PRINTABLE REPORTS</span>
+                  </div>
+                  <div className="bg-zinc-950 rounded-2xl border border-zinc-800/80 divide-y divide-zinc-800/60 overflow-hidden shadow-xs">
+                    {/* Supabase Sync */}
+                    <button
+                      type="button"
+                      onClick={() => setShowSupabaseModal(true)}
+                      className="w-full p-3.5 transition flex items-center justify-between text-left hover:bg-zinc-900/80 cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition-transform">
+                          <Database className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors">
+                              Cloud Database & Sync
+                            </span>
+                            <span className="px-2 py-0.5 text-[9px] font-extrabold rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                              Synced
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-zinc-400 mt-0.5">
+                            Real-time Supabase cloud database backup & auth
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+                    </button>
+
+                    {/* PDF Report Export */}
+                    <button
+                      type="button"
+                      onClick={() => setShowPdfReportModal(true)}
+                      className="w-full p-3.5 transition flex items-center justify-between text-left hover:bg-zinc-900/80 cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20 group-hover:scale-105 transition-transform">
+                          <Printer className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-white group-hover:text-amber-400 transition-colors">
+                            Export Printable PDF Accounting Ledger
+                          </div>
+                          <div className="text-[10px] text-zinc-400 mt-0.5">
+                            Generate print-ready statements for clients & collaborators
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
+                    </button>
+
+                    {/* JSON Offline Backup & Restore */}
+                    <div className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 rounded-xl bg-zinc-900 text-zinc-300 border border-zinc-800">
+                          <Download className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-white">
+                            JSON Backup & Local Storage
+                          </div>
+                          <div className="text-[10px] text-zinc-400 mt-0.5">
+                            Download offline copy or restore data from file
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleExportData}
+                          className="bg-zinc-900 hover:bg-zinc-800 text-amber-400 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-zinc-700/80 transition cursor-pointer flex items-center space-x-1"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Export</span>
+                        </button>
+                        <label className="bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-zinc-700/80 transition cursor-pointer flex items-center space-x-1">
+                          <Upload className="w-3 h-3 text-amber-400" />
+                          <span>Import</span>
+                          <input
+                            type="file"
+                            accept=".json"
+                            onChange={handleImportData}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* GROUP 4: SESSION & SECURITY */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-1 flex items-center space-x-1">
+                    <ShieldCheck className="w-3 h-3 text-amber-400" />
+                    <span>SESSION & SECURITY</span>
+                  </div>
+                  <div className="bg-zinc-950 rounded-2xl border border-zinc-800/80 divide-y divide-zinc-800/60 overflow-hidden shadow-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveModal(null);
+                        handleSignOut();
+                      }}
+                      className="w-full p-3.5 transition flex items-center justify-between text-left hover:bg-rose-500/10 cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 rounded-xl bg-rose-500/15 text-rose-400 border border-rose-500/20 group-hover:scale-105 transition-transform">
+                          <LogOut className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-rose-400 group-hover:text-rose-300 transition-colors">
+                            Lock App & Sign Out
+                          </div>
+                          <div className="text-[10px] text-zinc-400 mt-0.5">
+                            End current active session and lock application
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-rose-500/60 group-hover:text-rose-400 transition-colors" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sub-view Back Button when viewing Profile / Rates / Admin */}
+            {settingsTab !== 'menu' && (
+              <div className="pt-1">
                 <button
                   type="button"
-                  onClick={() => {
-                    setActiveModal(null);
-                    handleSignOut();
-                  }}
-                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-rose-400 font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-2 border border-zinc-700"
+                  onClick={() => setSettingsTab('menu')}
+                  className="mb-3 text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center space-x-1.5 bg-zinc-950 hover:bg-zinc-800/80 px-3 py-1.5 rounded-xl border border-zinc-800 transition cursor-pointer w-fit"
                 >
-                  <LogOut className="w-4 h-4" />
-                  <span>Lock App & Sign Out</span>
+                  <ChevronRight className="w-4 h-4 rotate-180" />
+                  <span>Back to Settings Menu</span>
                 </button>
               </div>
-            </form>
+            )}
+
+            {settingsTab === 'general' && (
+              <form onSubmit={handleSaveSettings} className="space-y-4 text-xs font-mono">
+                <div>
+                  <label className="block text-zinc-400 mb-1">Owner / Fleet Name</label>
+                  <input
+                    type="text"
+                    value={settingsForm.ownerName}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, ownerName: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-zinc-400 mb-1">Vehicle Registration No.</label>
+                  <input
+                    type="text"
+                    value={settingsForm.vehicleRegNo}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, vehicleRegNo: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-zinc-400 mb-1">Default Collab Rate per Trip ({sym})</label>
+                  <input
+                    type="number"
+                    required
+                    value={settingsForm.defaultCollabRate}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, defaultCollabRate: Number(e.target.value) || 0 })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-yellow-500"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-yellow-500/20"
+                >
+                  Save Profile Settings
+                </button>
+
+                <div className="pt-3 border-t border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveModal(null);
+                      handleSignOut();
+                    }}
+                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-rose-400 font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-2 border border-zinc-700"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Lock App & Sign Out</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* PENDING RATES MANAGER SUB-TAB */}
+            {settingsTab === 'pending_rates' && (
+              <div className="space-y-4 font-mono text-xs">
+                {/* Info Header Banner */}
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 flex items-start space-x-2.5">
+                  <Calculator className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block text-amber-400 font-bold">PENDING TRIP RATES MANAGER</strong>
+                    <span className="text-[11px] text-zinc-300">
+                      Daily trips recorded with ₹0 rate per trip need pricing. Select a date below to batch assign rates to matching routes.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Date Picker & Quick Date Selector */}
+                <div className="space-y-2 bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label className="text-xs font-bold text-zinc-300 flex items-center space-x-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Select Date for Pending Rates:</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={pendingRatesSelectedDate}
+                      onChange={(e) => setPendingRatesSelectedDate(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:border-amber-400 focus:outline-hidden"
+                    />
+                  </div>
+
+                  {/* Quick Date Chips */}
+                  {pendingRateDates.length > 0 && (
+                    <div className="pt-2 border-t border-zinc-800/80">
+                      <div className="text-[10px] text-zinc-500 mb-1.5 font-bold uppercase tracking-wider">
+                        Dates with Unpriced Trips ({pendingRateDates.length}):
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {pendingRateDates.map((d) => {
+                          const unpricedCountOnDate =
+                            (data.collabTrips || []).filter((t) => t.date === d && Number(t.ratePerTrip || 0) === 0).length +
+                            (data.privateTrips || []).filter((t) => t.date === d && Number(t.ratePerTrip || 0) === 0).length;
+                          const isSelected = pendingRatesSelectedDate === d;
+                          return (
+                            <button
+                              key={d}
+                              type="button"
+                              onClick={() => setPendingRatesSelectedDate(d)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center space-x-1 cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-400 text-black shadow-xs'
+                                  : 'bg-zinc-900 text-zinc-300 border border-zinc-800 hover:border-amber-500/50'
+                              }`}
+                            >
+                              <span>{formatDateReadable(d)}</span>
+                              <span
+                                className={`px-1.5 py-0.2 text-[9px] rounded-full font-extrabold ${
+                                  isSelected ? 'bg-black text-amber-400' : 'bg-amber-500/20 text-amber-400'
+                                }`}
+                              >
+                                {unpricedCountOnDate}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Route Cards List for Selected Date */}
+                {pendingRouteGroups.length === 0 ? (
+                  <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 text-center space-y-2">
+                    <div className="w-10 h-10 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-full flex items-center justify-center mx-auto">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div className="text-xs font-bold text-white">All Trips Fully Priced!</div>
+                    <div className="text-[11px] text-zinc-400">
+                      There are no ₹0 unpriced trip records on {formatDateReadable(pendingRatesSelectedDate)}.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-xs font-bold text-zinc-400 flex items-center justify-between">
+                      <span>Unpriced Routes for {formatDateReadable(pendingRatesSelectedDate)}</span>
+                      <span className="text-amber-400 text-[11px] font-extrabold">{pendingRouteGroups.length} Route Group(s)</span>
+                    </div>
+
+                    {pendingRouteGroups.map((group) => {
+                      const rateVal = pendingRateInputs[group.key] !== undefined ? pendingRateInputs[group.key] : '';
+                      const numRate = Number(rateVal) || 0;
+                      const calculatedTotal = group.tripsCount * numRate;
+
+                      return (
+                        <div
+                          key={group.key}
+                          className="bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl p-4 space-y-3 transition"
+                        >
+                          {/* Route header syntax format: [ Loading-point ] ➔ [ Unloading-point ] */}
+                          <div className="bg-amber-500/10 border border-amber-500/25 px-3 py-2.5 rounded-lg flex items-center justify-between">
+                            <div className="text-xs font-mono font-extrabold text-amber-400 flex items-center space-x-1.5 flex-wrap">
+                              <span>[ {group.loadingPoint} ]</span>
+                              <span className="text-amber-300">➔</span>
+                              <span>[ {group.unloadingPoint} ]</span>
+                            </div>
+                            <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-300 shrink-0 ml-2">
+                              {group.type === 'collab' ? 'Collaborator' : 'Private'}
+                            </span>
+                          </div>
+
+                          {/* Route Details */}
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-800/80">
+                              <div className="text-[10px] text-zinc-500 font-bold uppercase">Client / Collaborator</div>
+                              <div className="text-xs font-bold text-white truncate mt-0.5">{group.clientName}</div>
+                            </div>
+                            <div className="bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-800/80">
+                              <div className="text-[10px] text-zinc-500 font-bold uppercase">Total Trips Count</div>
+                              <div className="text-xs font-extrabold text-amber-400 mt-0.5">
+                                {group.tripsCount} Trip(s) <span className="text-[10px] font-normal text-zinc-500">({group.recordsCount} entry)</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Editable Rate Per Trip Field */}
+                          <div className="space-y-1">
+                            <label className="block text-[11px] font-bold text-zinc-300">
+                              Rate Per Trip ({sym})
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-2.5 text-zinc-400 font-bold text-xs">{sym}</span>
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="Enter rate per trip (e.g. 600)"
+                                value={rateVal}
+                                onChange={(e) =>
+                                  setPendingRateInputs((prev) => ({
+                                    ...prev,
+                                    [group.key]: e.target.value
+                                  }))
+                                }
+                                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg py-2 pl-7 pr-3 text-xs text-amber-400 font-extrabold focus:border-amber-400 focus:outline-hidden"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Real-time calculated total revenue preview */}
+                          <div className="bg-zinc-900/80 px-3 py-2 rounded-lg border border-zinc-800 flex items-center justify-between text-xs">
+                            <span className="text-zinc-400 text-[11px]">
+                              Total Revenue Preview ({group.tripsCount} × {sym}{numRate}):
+                            </span>
+                            <span className="font-extrabold text-emerald-400 text-sm">
+                              {formatCurrency(calculatedTotal, sym)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Sticky Save & Update Rates Button */}
+                    <div className="pt-2 sticky bottom-0 bg-zinc-900 pb-1 border-t border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={handleSavePendingRates}
+                        className="w-full bg-amber-400 hover:bg-amber-300 text-black font-extrabold py-3.5 rounded-xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-2 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                        <span>Save & Update Rates ({pendingRouteGroups.length} Route(s))</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {settingsTab === 'admin' && (
+              /* ADMIN SECTION: EDIT MY TRIPS */
+              <div className="space-y-3 font-mono">
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 flex items-start space-x-2.5">
+                  <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block text-amber-400 font-bold">ADMIN TRIP MANAGEMENT PANEL</strong>
+                    <span className="text-[11px] text-zinc-400">
+                      Centralized admin controls to edit or remove any recorded trips, expenses, or payouts safely.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Admin Search Bar */}
+                <div className="relative">
+                  <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={adminSearchQuery}
+                    onChange={(e) => setAdminSearchQuery(e.target.value)}
+                    placeholder="Search trip by collaborator, customer, route, or date..."
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50"
+                  />
+                  {adminSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setAdminSearchQuery('')}
+                      className="absolute right-3 top-2.5 text-zinc-500 hover:text-zinc-300"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Category filter tabs */}
+                <div className="flex items-center space-x-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-[11px] overflow-x-auto">
+                  {[
+                    { id: 'all', label: 'All Entries' },
+                    { id: 'collab', label: 'Collab Trips 🚚' },
+                    { id: 'private', label: 'Private Trips 💼' },
+                    { id: 'expense', label: 'Expenses ⛽' },
+                    { id: 'payment', label: 'Payouts 💵' }
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setAdminCategoryFilter(f.id as any)}
+                      className={`px-2.5 py-1 rounded-lg font-medium transition whitespace-nowrap ${
+                        adminCategoryFilter === f.id
+                          ? 'bg-amber-400 text-black font-bold'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* List of trips with explicit Edit Trip button */}
+                <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+                  {combinedActivityStream
+                    .filter((item) => {
+                      if (adminCategoryFilter !== 'all' && item.type !== adminCategoryFilter) return false;
+                      if (adminSearchQuery.trim()) {
+                        const q = adminSearchQuery.toLowerCase();
+                        return (
+                          item.title.toLowerCase().includes(q) ||
+                          item.subtitle.toLowerCase().includes(q) ||
+                          item.date.includes(q) ||
+                          (item.collaboratorName && item.collaboratorName.toLowerCase().includes(q))
+                        );
+                      }
+                      return true;
+                    })
+                    .map((item) => (
+                      <div
+                        key={item.id}
+                        className="bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 transition"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                                item.type === 'collab'
+                                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                  : item.type === 'private'
+                                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                                  : item.type === 'expense'
+                                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              }`}
+                            >
+                              {item.type}
+                            </span>
+                            <span className="text-xs font-bold text-white">{item.title}</span>
+                            <span className="text-[10px] text-zinc-500">({formatDateReadable(item.date)})</span>
+                          </div>
+                          <p className="text-[11px] text-zinc-400 line-clamp-1">{item.subtitle}</p>
+                        </div>
+
+                        <div className="flex items-center justify-between sm:justify-end space-x-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-zinc-800/60">
+                          <span
+                            className={`text-xs font-bold font-mono ${
+                              item.isIncome ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
+                          >
+                            {item.isIncome ? '+' : '-'}{formatCurrency(item.amount, sym)}
+                          </span>
+
+                          <div className="flex items-center space-x-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleEditItem(item);
+                              }}
+                              className="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-black font-bold text-[11px] rounded-lg transition flex items-center space-x-1 shadow-xs"
+                              title="Edit this trip in Admin Mode"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit Trip</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                requestDelete(item.id, item.type, item.title);
+                              }}
+                              className="p-1.5 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                              title="Delete entry"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                  {combinedActivityStream.filter((item) => {
+                    if (adminCategoryFilter !== 'all' && item.type !== adminCategoryFilter) return false;
+                    if (adminSearchQuery.trim()) {
+                      const q = adminSearchQuery.toLowerCase();
+                      return (
+                        item.title.toLowerCase().includes(q) ||
+                        item.subtitle.toLowerCase().includes(q) ||
+                        item.date.includes(q)
+                      );
+                    }
+                    return true;
+                  }).length === 0 && (
+                    <div className="p-6 text-center text-xs text-zinc-500 bg-zinc-950/40 rounded-xl border border-zinc-800/50">
+                      No matching trip entries found for editing.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -4005,6 +4806,449 @@ export default function App() {
                 ℹ️ The generated PDF contains an official accounting breakdown including vehicle registration details, executive financial summary, collaborator balances, and itemized transaction log entries for tax & bookkeeping purposes.
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================== */}
+      {/* MODAL: TRANSACTION CONFIRMATION DIALOG     */}
+      {/* ========================================== */}
+      {transactionSuccessModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
+          <div className="bg-zinc-900 border border-emerald-500/40 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl relative">
+            {/* Header / Success Indicator */}
+            <div className="text-center space-y-2">
+              <div className="w-14 h-14 bg-emerald-500/10 border-2 border-emerald-500/40 text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/10">
+                <CheckCircle2 className="w-8 h-8 stroke-[2.5]" />
+              </div>
+              <h3 className="text-lg font-mono font-bold text-white tracking-wide">
+                {transactionSuccessModal.title}
+              </h3>
+              <p className="text-xs font-mono text-zinc-400">
+                Transaction has been successfully saved to your records.
+              </p>
+            </div>
+
+            {/* Transaction Details Card */}
+            <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-2 font-mono">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span>Entry Type</span>
+                <span className="font-bold text-white capitalize">{transactionSuccessModal.type} Log</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span>Details</span>
+                <span className="font-bold text-zinc-200 text-right max-w-[200px] truncate">
+                  {transactionSuccessModal.subtitle}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span>Date Recorded</span>
+                <span className="font-bold text-zinc-300">
+                  {formatDateReadable(transactionSuccessModal.date)}
+                </span>
+              </div>
+              <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-300">Total Value</span>
+                <span className="text-base font-extrabold text-emerald-400">
+                  {formatCurrency(transactionSuccessModal.amount, sym)}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2.5 pt-1 font-mono text-xs">
+              {/* Primary Action: + Save & Log Another */}
+              <button
+                type="button"
+                onClick={() => {
+                  const targetType = transactionSuccessModal.type;
+                  setTransactionSuccessModal(null);
+                  if (targetType === 'collab') {
+                    setActiveModal('collab');
+                  } else if (targetType === 'private') {
+                    setActiveModal('private');
+                  } else if (targetType === 'expense') {
+                    setActiveModal('expense');
+                  } else if (targetType === 'payment') {
+                    setActiveModal('payment');
+                  }
+                }}
+                className="w-full bg-amber-400 hover:bg-amber-300 text-black font-extrabold py-3 rounded-xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                <span>+ Save & Log Another</span>
+              </button>
+
+              {/* Optional Fuel Expense Helper for Private/Collab Trips */}
+              {(transactionSuccessModal.type === 'private' || transactionSuccessModal.type === 'collab') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const savedDate = transactionSuccessModal.date;
+                    const savedCustomer = transactionSuccessModal.subtitle;
+                    setTransactionSuccessModal(null);
+                    setExpenseForm({
+                      date: savedDate,
+                      category: 'Fuel',
+                      amount: transactionSuccessModal.savedFuel || 0,
+                      notes: `Fuel expense for ${savedCustomer}`
+                    });
+                    setActiveModal('expense');
+                  }}
+                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-rose-400 border border-rose-500/30 font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-1.5 cursor-pointer"
+                >
+                  <Fuel className="w-3.5 h-3.5 text-rose-400" />
+                  <span>+ Add Fuel Expense for this Trip</span>
+                </button>
+              )}
+
+              {/* Exit Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTransactionSuccessModal(null);
+                  setActiveModal(null);
+                }}
+                className="w-full bg-zinc-800/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 font-bold py-2.5 rounded-xl transition flex items-center justify-center space-x-2 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+                <span>Exit</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================== */}
+      {/* TRANSACTION DETAIL & TOTAL INFO POPUP      */}
+      {/* ========================================== */}
+      {selectedTransactionDetail && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
+          <div className="bg-zinc-900 border border-amber-500/40 rounded-2xl sm:rounded-3xl w-full max-w-lg p-4 sm:p-6 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl font-mono text-xs">
+            
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center space-x-3">
+                <div
+                  className={`p-2.5 rounded-xl ${
+                    selectedTransactionDetail.type === 'collab'
+                      ? 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30'
+                      : selectedTransactionDetail.type === 'private'
+                      ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                      : selectedTransactionDetail.type === 'expense'
+                      ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                      : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                  }`}
+                >
+                  {selectedTransactionDetail.type === 'collab' && <Truck className="w-5 h-5" />}
+                  {selectedTransactionDetail.type === 'private' && <Briefcase className="w-5 h-5" />}
+                  {selectedTransactionDetail.type === 'expense' && <Fuel className="w-5 h-5" />}
+                  {selectedTransactionDetail.type === 'payment' && <DollarSign className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-bold">
+                      {selectedTransactionDetail.type === 'collab'
+                        ? 'Collab Trip Log'
+                        : selectedTransactionDetail.type === 'private'
+                        ? 'Private Trip Log'
+                        : selectedTransactionDetail.type === 'expense'
+                        ? 'Operational Expense'
+                        : 'Collaborator Payout'}
+                    </span>
+                    {selectedTransactionDetail.type === 'collab' && (
+                      <button
+                        onClick={() => {
+                          handleToggleCollabSettled(selectedTransactionDetail.id);
+                          setSelectedTransactionDetail((prev) =>
+                            prev ? { ...prev, settled: !prev.settled } : null
+                          );
+                        }}
+                        className={`text-[9px] px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                          selectedTransactionDetail.settled
+                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                            : 'bg-amber-950 text-amber-400 border border-amber-800'
+                        }`}
+                      >
+                        {selectedTransactionDetail.settled ? '✓ SETTLED' : '⚠ UNSETTLED'}
+                      </button>
+                    )}
+                  </div>
+                  <h3 className="text-base font-extrabold text-white mt-0.5">
+                    {selectedTransactionDetail.title}
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSelectedTransactionDetail(null)}
+                className="text-zinc-400 hover:text-white p-1.5 rounded-xl hover:bg-zinc-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Main Total Amount Banner */}
+            <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider block">
+                  {selectedTransactionDetail.isIncome ? 'TOTAL REVENUE' : 'TOTAL OUTFLOW'}
+                </span>
+                <div
+                  className={`text-2xl font-black ${
+                    selectedTransactionDetail.isIncome ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {selectedTransactionDetail.isIncome ? '+' : '-'}{formatCurrency(selectedTransactionDetail.amount, sym)}
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider block">DATE</span>
+                <div className="text-xs font-bold text-zinc-200">
+                  {formatDateReadable(selectedTransactionDetail.date)}
+                </div>
+              </div>
+            </div>
+
+            {/* Detail Breakdown Cards */}
+            <div className="space-y-3">
+              <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider px-1">
+                Total Information Breakdown
+              </h4>
+
+              {/* COLLAB TRIP DETAILS */}
+              {selectedTransactionDetail.type === 'collab' && (
+                <div className="bg-zinc-950 rounded-2xl p-3.5 border border-zinc-800/80 space-y-2.5">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Trips Completed</span>
+                      <span className="font-bold text-white text-sm">
+                        {selectedTransactionDetail.rawObject.tripsCount || 1} Trips
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Rate Per Trip</span>
+                      <span className="font-bold text-amber-400 text-sm">
+                        {sym}{selectedTransactionDetail.rawObject.ratePerTrip || 0} / trip
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Shift Type</span>
+                      <span className="font-bold text-zinc-200">
+                        {selectedTransactionDetail.rawObject.shift || 'Day'} Shift
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Collaborator</span>
+                      <span className="font-bold text-amber-300">
+                        {selectedTransactionDetail.collaboratorName || selectedTransactionDetail.title}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Route */}
+                  {(selectedTransactionDetail.rawObject.loadingPoint || selectedTransactionDetail.rawObject.unloadingPoint) && (
+                    <div className="pt-2 border-t border-zinc-800/80 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-zinc-500 text-[10px] block">Loading Point</span>
+                        <span className="font-bold text-zinc-300">
+                          {selectedTransactionDetail.rawObject.loadingPoint || 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500 text-[10px] block">Unloading Point</span>
+                        <span className="font-bold text-zinc-300">
+                          {selectedTransactionDetail.rawObject.unloadingPoint || 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Financial Breakdown (Fuel, Driver Pay, Net Margin) */}
+                  <div className="pt-2 border-t border-zinc-800/80 grid grid-cols-3 gap-2 bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-800">
+                    <div>
+                      <span className="text-[9px] text-zinc-400 uppercase block">Fuel Cost</span>
+                      <span className="font-bold text-rose-400">
+                        {formatCurrency(selectedTransactionDetail.rawObject.fuelExpense || 0, sym)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-zinc-400 uppercase block">Driver Pay</span>
+                      <span className="font-bold text-amber-400">
+                        {formatCurrency(selectedTransactionDetail.rawObject.driverPay || 0, sym)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-zinc-400 uppercase block">Net Margin</span>
+                      <span className="font-bold text-emerald-400">
+                        {formatCurrency(
+                          selectedTransactionDetail.amount -
+                            (selectedTransactionDetail.rawObject.fuelExpense || 0) -
+                            (selectedTransactionDetail.rawObject.driverPay || 0),
+                          sym
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {selectedTransactionDetail.rawObject.notes && (
+                    <div className="pt-2 border-t border-zinc-800/80">
+                      <span className="text-zinc-500 text-[10px] block">Notes / Remarks</span>
+                      <p className="text-zinc-300 text-xs italic">
+                        "{selectedTransactionDetail.rawObject.notes}"
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* PRIVATE TRIP DETAILS */}
+              {selectedTransactionDetail.type === 'private' && (
+                <div className="bg-zinc-950 rounded-2xl p-3.5 border border-zinc-800/80 space-y-2.5">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Customer / Site</span>
+                      <span className="font-bold text-white text-sm">
+                        {selectedTransactionDetail.rawObject.customerName}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Payment Status</span>
+                      <span className="font-bold text-cyan-400">
+                        {selectedTransactionDetail.rawObject.paymentStatus}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Trips Completed</span>
+                      <span className="font-bold text-zinc-200">
+                        {selectedTransactionDetail.rawObject.tripsCount} Trips
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Rate Per Trip</span>
+                      <span className="font-bold text-cyan-300">
+                        {sym}{selectedTransactionDetail.rawObject.ratePerTrip} / trip
+                      </span>
+                    </div>
+                  </div>
+
+                  {selectedTransactionDetail.rawObject.extraFuelCost > 0 && (
+                    <div className="pt-2 border-t border-zinc-800/80">
+                      <span className="text-zinc-500 text-[10px] block">Extra Fuel Expense</span>
+                      <span className="font-bold text-rose-400">
+                        {formatCurrency(selectedTransactionDetail.rawObject.extraFuelCost, sym)}
+                      </span>
+                    </div>
+                  )}
+
+                  {selectedTransactionDetail.rawObject.notes && (
+                    <div className="pt-2 border-t border-zinc-800/80">
+                      <span className="text-zinc-500 text-[10px] block">Notes / Remarks</span>
+                      <p className="text-zinc-300 text-xs italic">
+                        "{selectedTransactionDetail.rawObject.notes}"
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* EXPENSE DETAILS */}
+              {selectedTransactionDetail.type === 'expense' && (
+                <div className="bg-zinc-950 rounded-2xl p-3.5 border border-zinc-800/80 space-y-2.5">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Expense Category</span>
+                      <span className="font-bold text-rose-400 text-sm">
+                        {selectedTransactionDetail.rawObject.category}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Total Amount Paid</span>
+                      <span className="font-bold text-rose-400 text-sm">
+                        {formatCurrency(selectedTransactionDetail.amount, sym)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {selectedTransactionDetail.rawObject.notes && (
+                    <div className="pt-2 border-t border-zinc-800/80">
+                      <span className="text-zinc-500 text-[10px] block">Notes / Receipt Reference</span>
+                      <p className="text-zinc-300 text-xs italic">
+                        "{selectedTransactionDetail.rawObject.notes}"
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* PAYMENT RECEIVED DETAILS */}
+              {selectedTransactionDetail.type === 'payment' && (
+                <div className="bg-zinc-950 rounded-2xl p-3.5 border border-zinc-800/80 space-y-2.5">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Collaborator</span>
+                      <span className="font-bold text-emerald-400 text-sm">
+                        {selectedTransactionDetail.collaboratorName || selectedTransactionDetail.title}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Payment Received</span>
+                      <span className="font-bold text-emerald-400 text-sm">
+                        {formatCurrency(selectedTransactionDetail.amount, sym)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {selectedTransactionDetail.rawObject.referenceNote && (
+                    <div className="pt-2 border-t border-zinc-800/80">
+                      <span className="text-zinc-500 text-[10px] block">Reference Note</span>
+                      <p className="text-zinc-300 text-xs italic">
+                        "{selectedTransactionDetail.rawObject.referenceNote}"
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer Action Buttons */}
+            <div className="pt-2 flex items-center justify-between gap-2 border-t border-zinc-800">
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const item = selectedTransactionDetail;
+                    setSelectedTransactionDetail(null);
+                    handleEditItem(item);
+                  }}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-amber-400 font-bold px-3 py-2 rounded-xl transition flex items-center space-x-1.5 cursor-pointer border border-zinc-700"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>Edit Entry</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const item = selectedTransactionDetail;
+                    setSelectedTransactionDetail(null);
+                    requestDelete(item.id, item.type, item.title);
+                  }}
+                  className="bg-zinc-800 hover:bg-rose-950 hover:text-rose-400 text-zinc-400 font-bold px-3 py-2 rounded-xl transition flex items-center space-x-1.5 cursor-pointer border border-zinc-700"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedTransactionDetail(null)}
+                className="bg-amber-400 hover:bg-amber-300 text-black font-extrabold px-4 py-2 rounded-xl transition cursor-pointer shadow-md"
+              >
+                Close
+              </button>
+            </div>
+
           </div>
         </div>
       )}

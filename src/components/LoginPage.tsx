@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Truck, Lock, Mail, User, ShieldCheck, ArrowRight, UserPlus, LogIn, Eye, EyeOff, AlertCircle, CheckCircle2, Sparkles, Building } from 'lucide-react';
+import { Truck, Lock, Mail, User, ShieldCheck, ArrowRight, UserPlus, LogIn, Eye, EyeOff, AlertCircle, CheckCircle2, Sparkles, Building, KeyRound, RotateCcw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface UserProfile {
@@ -21,7 +21,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   vehicleRegNo = '',
   onLoginSuccess
 }) => {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
 
   // Form State
   const [email, setEmail] = useState('');
@@ -261,6 +261,92 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }
   };
 
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const cleanIdentifier = email.trim();
+    const cleanNewPassword = password.trim();
+
+    if (!cleanIdentifier) {
+      setErrorMsg('Please enter your email address or phone number.');
+      return;
+    }
+
+    if (!cleanNewPassword || cleanNewPassword.length < 6) {
+      setErrorMsg('New password must be at least 6 characters long.');
+      return;
+    }
+
+    if (cleanNewPassword !== confirmPassword.trim()) {
+      setErrorMsg('Passwords do not match.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    const isEmail = cleanIdentifier.includes('@');
+    const normalizedEmail = isEmail
+      ? cleanIdentifier.toLowerCase()
+      : `${cleanIdentifier.replace(/[^0-9]/g, '')}@phone.tipperlog.com`;
+
+    try {
+      // 1. Trigger Supabase Auth password reset email if accessible
+      if (isEmail) {
+        try {
+          await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+            redirectTo: window.location.origin
+          });
+        } catch (sErr) {
+          console.warn('Supabase password reset note:', sErr);
+        }
+      }
+
+      // 2. Update LocalStorage registered user records
+      const localUsers = getRegisteredUsers();
+      let updatedCount = 0;
+
+      const updatedUsers = localUsers.map((u) => {
+        const uEmail = (u.email || '').toLowerCase();
+        const input = cleanIdentifier.toLowerCase();
+        const inputDigits = cleanIdentifier.replace(/[^0-9]/g, '');
+        const uDigits = uEmail.replace(/[^0-9]/g, '');
+
+        const isMatch =
+          uEmail === input ||
+          (inputDigits.length >= 7 && uDigits.length >= 7 && inputDigits === uDigits);
+
+        if (isMatch) {
+          updatedCount++;
+          return {
+            ...u,
+            password: cleanNewPassword
+          };
+        }
+        return u;
+      });
+
+      if (updatedCount > 0) {
+        localStorage.setItem('tipperlog_registered_users', JSON.stringify(updatedUsers));
+        setSuccessMsg('Password updated successfully! Redirecting to Log In...');
+      } else {
+        setSuccessMsg('Password reset processed! Redirecting to Log In...');
+      }
+
+      setPassword(cleanNewPassword);
+      setConfirmPassword('');
+      setTimeout(() => {
+        setMode('login');
+      }, 1200);
+    } catch (err: any) {
+      console.error('Password reset failed:', err);
+      setErrorMsg('Failed to reset password. Please check your credentials.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const finishAuth = (profile: UserProfile) => {
     if (rememberMe) {
       localStorage.setItem('tipperlog_auth_logged_in', 'true');
@@ -300,12 +386,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </span>
           </h1>
           <p className="text-xs text-zinc-400 mt-1">
-            {mode === 'login' ? 'Sign in to access your trip logs & accounts' : 'Create an account to manage fleet & collaborator logs'}
+            {mode === 'login'
+              ? 'Sign in to access your trip logs & accounts'
+              : mode === 'signup'
+              ? 'Create an account to manage fleet & collaborator logs'
+              : 'Reset your account password'}
           </p>
         </div>
 
         {/* Tab Switcher: Log In vs Sign Up */}
-        <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800 mb-6">
+        <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800 mb-6 text-[11px]">
           <button
             type="button"
             onClick={() => {
@@ -313,14 +403,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               setErrorMsg('');
               setSuccessMsg('');
             }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 py-2 font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
               mode === 'login'
                 ? 'bg-amber-500 text-zinc-950 shadow-md font-extrabold'
-                : 'text-zinc-400 hover:text-white'
+                : 'text-zinc-400 hover:text-white cursor-pointer'
             }`}
           >
             <LogIn className="w-3.5 h-3.5" />
-            <span>Account Log In</span>
+            <span>Log In</span>
           </button>
           <button
             type="button"
@@ -329,14 +419,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               setErrorMsg('');
               setSuccessMsg('');
             }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 py-2 font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
               mode === 'signup'
                 ? 'bg-amber-500 text-zinc-950 shadow-md font-extrabold'
-                : 'text-zinc-400 hover:text-white'
+                : 'text-zinc-400 hover:text-white cursor-pointer'
             }`}
           >
             <UserPlus className="w-3.5 h-3.5" />
-            <span>Create Account</span>
+            <span>Sign Up</span>
           </button>
         </div>
 
@@ -411,16 +501,118 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <div className="flex justify-end mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('reset');
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                  }}
+                  className="text-[11px] text-amber-400 hover:underline font-medium flex items-center gap-1 cursor-pointer"
+                >
+                  <KeyRound className="w-3 h-3" />
+                  <span>Forgot password? Reset here</span>
+                </button>
+              </div>
             </div>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black py-3 rounded-xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-2 mt-4"
+              className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black py-3 rounded-xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-2 mt-4 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
               <span>{isLoading ? 'Signing In...' : 'Log In to Account'}</span>
               <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
+        )}
+
+        {/* RESET PASSWORD FORM */}
+        {mode === 'reset' && (
+          <form onSubmit={handleResetPassword} className="space-y-3.5">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 flex items-start space-x-2.5">
+              <KeyRound className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="block text-amber-400 font-bold">RESET YOUR PASSWORD</strong>
+                <span className="text-[11px] text-zinc-300">
+                  Enter your registered email or phone number along with your new password to update your login credentials.
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-300 mb-1 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-amber-400" />
+                <span>Email Address or Phone Number</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setErrorMsg('');
+                }}
+                placeholder="e.g. owner@tipperlog.com or 9876543210"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400 transition"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-300 mb-1 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+                <span>New Password (Min 6 characters)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setErrorMsg('');
+                  }}
+                  placeholder="Enter your new password"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400 transition pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-300 mb-1 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Confirm New Password</span>
+              </label>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={confirmPassword}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  setErrorMsg('');
+                }}
+                placeholder="Repeat your new password"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400 transition"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black py-3 rounded-xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-2 mt-2 cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>{isLoading ? 'Updating Password...' : 'Reset & Update Password'}</span>
             </button>
           </form>
         )}
@@ -547,10 +739,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
           <button
             type="button"
-            onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
-            className="text-[11px] text-amber-400 hover:underline font-medium"
+            onClick={() => {
+              setMode(mode === 'login' ? 'signup' : 'login');
+              setErrorMsg('');
+              setSuccessMsg('');
+            }}
+            className="text-[11px] text-amber-400 hover:underline font-medium cursor-pointer"
           >
-            {mode === 'login' ? 'Need an account? Sign Up' : 'Already registered? Log In'}
+            {mode === 'login'
+              ? 'Need an account? Sign Up'
+              : mode === 'signup'
+              ? 'Already registered? Log In'
+              : 'Remembered your password? Log In'}
           </button>
         </div>
 
