@@ -1148,13 +1148,16 @@ export default function App() {
     data.collabTrips.forEach((c) => {
       const cName = c.collaboratorName || (data.collaborators || defaultCollaborators).find((col) => col.id === c.collaboratorId)?.name || 'Collaborator';
       const routeText = (c.loadingPoint || c.unloadingPoint)
-        ? ` • Route: ${c.loadingPoint || 'Kucharam-Loading point'}${c.unloadingPoint ? ` ➔ ${c.unloadingPoint}` : ''}`
+        ? ` • Route: ${c.loadingPoint || 'Kucharam'}${c.unloadingPoint ? ` ➔ ${c.unloadingPoint}` : ''}`
         : '';
+      const displayTitle = c.unloadingPoint?.trim()
+        ? `${c.unloadingPoint.trim()} (${c.shift} Shift)`
+        : `Collab Trip (${c.shift} Shift)`;
       stream.push({
         id: c.id,
         type: 'collab',
         date: c.date,
-        title: `Collab Trip (${c.shift} Shift)`,
+        title: displayTitle,
         subtitle: `${cName} • ${c.tripsCount} Trips @ ${sym}${c.ratePerTrip}/trip${routeText}${c.notes ? ` • ${c.notes}` : ''}`,
         amount: c.totalAmount,
         isIncome: true,
@@ -2331,15 +2334,9 @@ export default function App() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 truncate">
                           <span className="text-xs font-bold text-white truncate">{item.title}</span>
-                          {item.type === 'collab' && (
-                            <span
-                              className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-extrabold shrink-0 ${
-                                item.settled
-                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                                  : 'bg-amber-950 text-amber-400 border border-amber-800'
-                              }`}
-                            >
-                              {item.settled ? '✓ SETTLED' : '⚠ UNSETTLED'}
+                          {item.type === 'collab' && item.settled && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-extrabold shrink-0 bg-emerald-950 text-emerald-400 border border-emerald-800">
+                              ✓ SETTLED
                             </span>
                           )}
                         </div>
@@ -2480,15 +2477,9 @@ export default function App() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center space-x-2 truncate">
                         <span className="text-xs font-bold text-white truncate">{item.title}</span>
-                        {item.type === 'collab' && (
-                          <span
-                            className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-extrabold shrink-0 ${
-                              item.settled
-                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                                : 'bg-amber-950 text-amber-400 border border-amber-800'
-                            }`}
-                          >
-                            {item.settled ? '✓ SETTLED' : '⚠ UNSETTLED'}
+                        {item.type === 'collab' && item.settled && (
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-extrabold shrink-0 bg-emerald-950 text-emerald-400 border border-emerald-800">
+                            ✓ SETTLED
                           </span>
                         )}
                       </div>
@@ -4967,10 +4958,10 @@ export default function App() {
                         className={`text-[9px] px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
                           selectedTransactionDetail.settled
                             ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                            : 'bg-amber-950 text-amber-400 border border-amber-800'
+                            : 'bg-zinc-800 text-zinc-400 hover:text-amber-400 border border-zinc-700'
                         }`}
                       >
-                        {selectedTransactionDetail.settled ? '✓ SETTLED' : '⚠ UNSETTLED'}
+                        {selectedTransactionDetail.settled ? '✓ SETTLED' : '+ Mark Settled'}
                       </button>
                     )}
                   </div>
